@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# =============================================================================
+# ============================================================================
 # OSIRIS Imhotep — one-time Google Cloud bootstrap for Cloud Run + GitHub CI/CD
 #
 # Run this from Google Cloud Shell (https://cloud.google.com/shell) where gcloud
@@ -14,12 +14,14 @@
 #
 # What it creates (idempotent — safe to re-run):
 #   1. Artifact Registry  osiris-images
-#   2. Cloud SQL Postgres osiris-db (smallest dev tier) + osiris DB + osiris user
-#   3. Secret Manager secrets (DeepSeek, Gemini, JWT, superadmin, DB URL, gdoc SA)
-#   4. Service accounts: osiris-deploy-sa, osiris-backend-sa, osiris-gdoc-sa
-#   5. Workload Identity Federation for GitHub Actions (keyless auth)
-#   6. Prints the 3 values to store as GitHub Actions secrets
-# =============================================================================
+#   2. Secret Manager secrets (DeepSeek, Gemini, JWT, superadmin, DB URL, gdoc SA)
+#   3. Service accounts: osiris-deploy-sa, osiris-backend-sa, osiris-gdoc-sa
+#   4. Workload Identity Federation for GitHub Actions (keyless auth)
+#   5. Prints the 3 values to store as GitHub Actions secrets
+#
+# For production: To switch to Cloud SQL, re-run with:
+#   USE_CLOUD_SQL=1 bash deploy/bootstrap.sh
+# ============================================================================
 set -euo pipefail
 
 PROJECT_ID="${GCP_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null | tr -d '\n')}"
@@ -67,9 +69,39 @@ fi
 [ -n "$DEEPSEEK_API_KEY" ] || fail "DeepSeek API key is required."
 [ -n "$GEMINI_API_KEY" ]   || fail "Gemini API key is required."
 
+# Handle two modes: Neon (default) or Cloud SQL (for production)
+if [ "${USE_CLOUD_SQL:-}" = "1" ]; then
+  step "Provision Cloud SQL instance + DB + user (production mode)"
+  if [ -z "${DB_PASSWORD:-}" ]; then DB_PASSWORD="$(openssl rand -base64 12 | tr '+/' '-_')"; fi
+  if ! gcloud sql instances describe "$INSTANCE" >/dev/null 2>&1; then
+    gcloud sql instances create "$INSTANCE" --database-version=POSTGRES_15 --tier=db-f1-micro --region="$REGION" --no-assign-ip --storage-size=10GB --storage-type=HDD --availability-policy=ZONAL --quiet
+  fi
+  gcloud sql databases create "$DB_NAME" --instance="$INSTANCE" 2>/dev/null || true
+  if ! gcloud sql users list --instance="$INSTANCE" --filter="name:$DB_USER" --format="value(name)" | grep -q "^$DB_USER$"; then
+    gcloud sql users create "$DB_USER" --instance="$INSTANCE" --password="$DB_PASSWORD"
+  fi
+  DATABASE_URL="postgres+pg8000://${DB_USER}:${DB_PASSWORD}@/${DB_NAME}?unix_sock=/cloudsql/${PROJECT_ID}:${REGION}:${INSTANCE}/.s.PGSQL.5432"
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$BACKEND_SA@$PROJECT_ID.iam.gserviceaccount.com" --role=roles/cloudsql.client >/dev/null 2>&1 || true
+else
+  # Default mode: Neon (free tier)
+  step "Configure Neon PostgreSQL connection"
+  if [ -z "${NEON_CONNECTION_STRING:-}" ]; then
+    read -r -s -p "Neon connection string (postgres://user:pass@host.neon.tech/db?sslmode=require): " NEON_CONNECTION_STRING; echo
+  fi
+  [ -n "$NEON_CONNECTION_STRING" ] || fail "Neon connection string is required."
+  DATABASE_URL="${NEON_CONNECTION_STRING/postgres:\\/\\//postgres+pg8000:\/\/}"
+  DATABASE_URL="${DATABASE_URL/postgresql:\\/\\//postgres+pg8000:\/\/}"
+  if [[ "$DATABASE_URL" != *"sslmode="* ]]; then
+    if [[ "$DATABASE_URL" == *"?"* ]]; then
+      DATABASE_URL="${DATABASE_URL}&sslmode=require"
+    else
+      DATABASE_URL="${DATABASE_URL}?sslmode=require"
+    fi
+  fi
+fi
+
 JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 32)}"
 SUPERADMIN_PASSWORD="${SUPERADMIN_PASSWORD:-$(openssl rand -base64 12 | tr '+/' '-_')}"
-DATABASE_URL="postgres+pg8000://${DB_USER}:${DB_PASSWORD}@/${DB_NAME}?unix_sock=/cloudsql/${PROJECT_ID}:${REGION}:${INSTANCE}/.s.PGSQL.5432"
 
 secret deepseek-api-key    "$DEEPSEEK_API_KEY"
 secret gemini-api-key      "$GEMINI_API_KEY"
@@ -110,11 +142,21 @@ for role in roles/run.admin roles/artifactregistry.writer roles/iam.serviceAccou
 done
 
 echo "  Granting roles to $BACKEND_SA ..."
-for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$BACKEND_SA@$PROJECT_ID.iam.gserviceaccount.com" \
-    --role="$role" >/dev/null 2>&1 || true
-done
+# Only add cloudsql.client role if we're using Cloud SQL
+if [ "${USE_CLOUD_SQL:-}" = "1" ]; then
+  for role in roles/cloudsql.client roles/secretmanager.secretAccessor; do
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+      --member="serviceAccount:$BACKEND_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+      --role="$role" >/dev/null 2>&1 || true
+  done
+else
+  # For Neon/Supabase, only need secret manager access
+  for role in roles/secretmanager.secretAccessor; do
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+      --member="serviceAccount:$BACKEND_SA@$PROJECT_ID.iam.gserviceaccount.com" \
+      --role="$role" >/dev/null 2>&1 || true
+  done
+fi
 
 gcloud iam service-accounts add-iam-policy-binding \
   "$BACKEND_SA@$PROJECT_ID.iam.gserviceaccount.com" \
@@ -157,4 +199,11 @@ echo "    username: admin"
 echo "    password: ${SUPERADMIN_PASSWORD}   (also stored in the superadmin-password secret)"
 echo ""
 echo "  Tip: gcloud secrets versions access latest --secret=superadmin-password"
+echo ""
+if [ "${USE_CLOUD_SQL:-}" = "1" ]; then
+  echo "  NOTE: Running in CLOUD SQL mode (use unset USE_CLOUD_SQL for Neon default)"
+else
+  echo "  NOTE: Running in NEON (free tier) mode - set USE_CLOUD_SQL=1 for production Cloud SQL"
+fi
+echo ""
 

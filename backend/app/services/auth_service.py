@@ -17,7 +17,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, unquote
 
 from app.config import Settings
 from app.core.security import create_token, decode_token, generate_salt, hash_password, verify_password
@@ -32,17 +32,41 @@ class AuthError(RuntimeError):
 
 
 def _parse_database_url(url: str) -> dict[str, Any]:
-    """Parse ``postgres+pg8000://user:pass@host:port/db`` or
-    ``postgres+pg8000://user:pass@/db?unix_sock=/cloudsql/.../.s.PGSQL.5432``."""
-    parsed = urlparse(url.strip())
+    """Parse ``postgres+pg8000://user:pass@host:port/db`` (Neon / Supabase / external)
+    or ``postgres+pg8000://user:pass@/db?unix_sock=/cloudsql/.../.s.PGSQL.5432``
+    (Cloud SQL — production path).
+
+    Recognised query parameters:
+      * ``unix_sock``  – Cloud SQL Unix-socket path (overrides host/port)
+      * ``sslmode``    – "require" | "verify-ca" | "verify-full" (default for
+                         any TCP host)
+      * ``sslrootcert``– path to a CA bundle when ``sslmode=verify-*``
+      * ``sslcert`` / ``sslkey`` – mTLS client cert/key paths
+    """
+    url = url.strip()
+    if url.startswith(("postgres://", "postgresql://")):
+        # Standard scheme works with pg8000, but keep the explicit prefix for clarity.
+        url = "postgres+pg8000://" + url.split("://", 1)[1]
+    parsed = urlparse(url)
     query = parse_qs(parsed.query)
+    password = parsed.password or ""
+    if password and "%" in password:
+        # Some providers URL-encode special characters in passwords.
+        password = unquote(password)
     return {
         "user": parsed.username or "",
-        "password": parsed.password or "",
+        "password": password,
         "database": parsed.path.lstrip("/"),
         "host": parsed.hostname,
         "port": parsed.port or 5432,
         "unix_sock": (query.get("unix_sock") or [""])[0] or None,
+        # Default sslmode to "require" for any non-socket host so Neon/Supabase
+        # work out of the box. Cloud SQL unix-socket connections skip TLS.
+        "sslmode": (query.get("sslmode") or [None])[0]
+        or ("require" if not (query.get("unix_sock") or [""])[0] else None),
+        "sslrootcert": (query.get("sslrootcert") or [None])[0],
+        "sslcert": (query.get("sslcert") or [None])[0],
+        "sslkey": (query.get("sslkey") or [None])[0],
     }
 
 
@@ -90,13 +114,39 @@ class UserStore:
             "database": self._pg["database"],
             "timeout": 15,
         }
-        if self._pg["unix_sock"]:
+
+        # --- Cloud SQL unix-socket path (production default) -------------------
+        if self._pg.get("unix_sock"):
             kwargs["unix_sock"] = self._pg["unix_sock"]
+            conn = pg8000.dbapi.connect(**kwargs)
+            conn.autocommit = True
+            return conn
+
+        # --- External Postgres (Neon / Supabase / etc.) via TCP ---------------
+        sslmode = self._pg.get("sslmode")
+        if sslmode:
+            ssl_ctx: dict[str, Any] = {"sslmode": sslmode}
+            # For verify-* modes we need to point to a CA bundle.
+            if sslmode in ("verify-ca", "verify-full"):
+                ca_path = self._pg.get("sslrootcert")
+                if ca_path:
+                    ssl_ctx["sslrootcert"] = ca_path
+            # Optional mTLS
+            cert_path = self._pg.get("sslcert")
+            key_path = self._pg.get("sslkey")
+            if cert_path and key_path:
+                ssl_ctx["sslcert"] = cert_path
+                ssl_ctx["sslkey"] = key_path
+            kwargs["ssl"] = ssl_ctx
         else:
-            kwargs["host"] = self._pg["host"] or "localhost"
-            kwargs["port"] = self._pg["port"] or 5432
+            # Default to "require" if connecting to a TCP host (not unix socket)
+            if self._pg.get("host"):
+                kwargs["host"] = self._pg["host"]
+                kwargs["port"] = self._pg["port"] or 5432
+                kwargs["ssl"] = {"sslmode": "require"}
+
         conn = pg8000.dbapi.connect(**kwargs)
-        conn.autocommit = True  # each statement commits immediately
+        conn.autocommit = True
         return conn
 
     def _connect(self):
@@ -298,6 +348,17 @@ class UserStore:
             cur = conn.cursor()
             cur.execute(f"UPDATE users SET last_login_at = {self.ph} WHERE id = {self.ph}", (now, user_id))
             conn.commit()
+        finally:
+            conn.close()
+
+    def delete_user(self, username: str) -> bool:
+        """Permanently remove a user by username. Returns True if a row was deleted."""
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"DELETE FROM users WHERE username = {self.ph}", (username,))
+            conn.commit()
+            return cur.rowcount > 0
         finally:
             conn.close()
 
