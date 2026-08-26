@@ -1,0 +1,81 @@
+﻿# cloudbuild.yaml - OSIRIS Imhotep
+# Triggers two Cloud Build steps:
+#   Step 0: Build + push backend image
+#   Step 1: Build + push frontend image
+#
+# Substitutions (set in Cloud Build trigger or override with -var):
+#   _REGION       = Artifact Registry region (e.g. us-central1)
+#   _REPO         = Artifact Registry repo name (e.g. osiris)
+#   _BACKEND_SRV  = Backend Cloud Run service name
+#   _FRONTEND_SRV = Frontend Cloud Run service name
+#
+substitutions:
+  _REGION: us-central1
+  _REPO: osiris
+  _BACKEND_SRV: osiris-backend
+  _FRONTEND_SRV: osiris-frontend
+
+steps:
+  # ── Step 0: Backend ───────────────────────────────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-backend"
+    args:
+      - "build"
+      - "-t"
+      - "-docker.pkg.dev///backend:"
+      - "-t"
+      - "-docker.pkg.dev///backend:latest"
+      - "--cache-from"
+      - "-docker.pkg.dev///backend:latest"
+      - "."
+    env:
+      - "DOCKER_BUILDKIT=1"
+
+  # ── Step 1: Frontend ──────────────────────────────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-frontend"
+    args:
+      - "build"
+      - "--build-arg"
+      - "NEXT_PUBLIC_API_URL=https://-.a.run.app/api"
+      - "--build-arg"
+      - "NEXT_PUBLIC_BACKEND_URL=https://-.a.run.app"
+      - "-t"
+      - "-docker.pkg.dev///frontend:"
+      - "-t"
+      - "-docker.pkg.dev///frontend:latest"
+      - "--cache-from"
+      - "-docker.pkg.dev///frontend:latest"
+      - "./frontend"
+    env:
+      - "DOCKER_BUILDKIT=1"
+
+  # ── Step 2: Push backend ──────────────────────────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-backend"
+    args:
+      - "push"
+      - "--all-tags"
+      - "-docker.pkg.dev///backend"
+    waitFor: ["build-backend"]
+
+  # ── Step 3: Push frontend ─────────────────────────────────────────────────
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-frontend"
+    args:
+      - "push"
+      - "--all-tags"
+      - "-docker.pkg.dev///frontend"
+    waitFor: ["build-frontend"]
+
+# Store images in Artifact Registry")
+images:
+  - "-docker.pkg.dev///backend:"
+  - "-docker.pkg.dev///backend:latest"
+  - "-docker.pkg.dev///frontend:"
+  - "-docker.pkg.dev///frontend:latest"
+
+# Speed up Docker builds (layer caching)
+options:
+  machineType: "E2_HIGHCPU_8"
+  logging: "CLOUD_LOGGING_ONLY"
