@@ -177,8 +177,8 @@ function EmptyState() {
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Engineering workspace</p>
       <h2 className="mt-2 text-2xl font-semibold text-slate-950">Turn field notes into a clear scope of work.</h2>
       <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-500">
-        Add engineer field notes and optional site photos or short video clips. Gemini extracts visual
-        evidence, then DeepSeek produces a structured SOW you can export to Google Docs.
+        Add engineer field notes and optional site photos or short video clips. OSIRIS extracts visual
+        evidence, to produce a structured SOW you can export to Google Docs.
       </p>
       </div>
       <div className="mt-7 grid grid-cols-1 gap-px overflow-hidden border border-slate-200 bg-slate-200 sm:grid-cols-3">
