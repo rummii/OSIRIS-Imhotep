@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -90,7 +90,35 @@ export default function AdminPage() {
   };
 
 
-        {/* Onboard user */}
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-5xl items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-md bg-slate-900">
+              <Shield size={17} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-slate-950">User management</h1>
+              <p className="text-[11px] text-slate-500">Superadmin · onboard and manage access</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => router.replace("/")}
+            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900">
+            <ArrowLeft size={16} /> Back
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl px-4 py-6 space-y-6 sm:px-6">
+        {error && (
+          <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">{error}</p>
+        )}
+        {notice && (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{notice}</p>
+        )}
+
+        {/* Onboard new user */}
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center gap-2">
             <UserPlus size={16} className="text-slate-400" />
@@ -120,35 +148,6 @@ export default function AdminPage() {
             </button>
           </form>
         </section>
-
-  return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
-        <div className="mx-auto flex max-w-5xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-md bg-slate-900">
-              <Shield size={17} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-slate-950">User management</h1>
-              <p className="text-[11px] text-slate-500">Superadmin · onboard and manage access</p>
-            </div>
-          </div>
-          <button type="button" onClick={() => router.replace("/")}
-            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900">
-            <ArrowLeft size={16} /> Back
-          </button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-5xl px-4 py-6 space-y-6 sm:px-6">
-        {error && (
-          <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">{error}</p>
-        )}
-        {notice && (
-          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{notice}</p>
-        )}
-
 
         {/* Users table */}
         <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -250,3 +249,4 @@ export default function AdminPage() {
     </div>
   );
 }
+
