@@ -1,5 +1,6 @@
-/** @type {import('next').NextConfig} */
+﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",   // produces .next/standalone/ — used by frontend/Dockerfile
   reactStrictMode: true,
   async rewrites() {
     // Proxy /api/* to the FastAPI backend so the browser only ever talks to
@@ -10,5 +11,3 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
-
-
