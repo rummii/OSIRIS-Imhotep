@@ -1,4 +1,4 @@
-﻿# OSIRIS Imhotep - Frontend (Next.js standalone)
+# OSIRIS Imhotep - Frontend (Next.js standalone)
 # Multi-stage: deps -> build -> runtime
 
 FROM node:20-alpine AS deps
@@ -13,8 +13,12 @@ WORKDIR /app
 # Public env vars baked at build time
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_BACKEND_URL
+# Private URL used by next.config.js rewrites() -- must be set at build time
+# because the Next.js config is evaluated during `next build`.
+ARG BACKEND_URL
 ENV NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_BACKEND_URL=
+ENV BACKEND_URL=
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ ./
