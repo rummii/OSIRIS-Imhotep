@@ -208,5 +208,7 @@ def _run_export_subprocess(sow: dict, owner_email: str | None) -> tuple[str, str
                 pass
 
     if not result.get("ok"):
+        if result.get("status") == 503:
+            raise GdocNotConfiguredError(result.get("error") or "Google Docs export is not configured.")
         raise RuntimeError(result.get("error") or "unknown export error")
     return str(result["doc_url"]), str(result["doc_id"])

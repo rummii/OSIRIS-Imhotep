@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # --- Auth (SSO login gate) ---
     jwt_secret: str = ""                       # leave empty to auto-generate + persist
     auth_db_path: str = "data/users.db"
+    database_url: str = ""                     # empty -> SQLite; else postgres+pg8000://...
     token_expiry_hours: int = 12
     superadmin_username: str = "admin"
     superadmin_display_name: str = "System Administrator"

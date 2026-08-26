@@ -49,7 +49,7 @@ def main() -> int:
         doc_url, doc_id = service.create_sow_document(sow, owner_email)
         result = {"ok": True, "doc_url": doc_url, "doc_id": doc_id}
     except GdocNotConfiguredError as exc:
-        result = {"ok": False, "error": str(exc)}
+        result = {"ok": False, "error": str(exc), "status": 503}
     except Exception as exc:
         result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         traceback.print_exc(file=sys.stderr)

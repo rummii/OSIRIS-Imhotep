@@ -24,3 +24,6 @@ google-api-python-client>=2.155,<3.0
 google-auth>=2.37,<3.0
 google-auth-httplib2>=0.2.0,<1.0
 google-auth-oauthlib>=1.2,<2.0
+
+# --- PostgreSQL driver (Cloud SQL on Cloud Run; SQLite is the local default) ---
+pg8000>=1.31,<2.0

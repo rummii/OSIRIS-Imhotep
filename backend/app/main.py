@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,10 +19,34 @@ from app.services.media_processor import ensure_temp_dir
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 logger = logging.getLogger("osiris")
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent  # backend/
+
+
+def materialize_google_credentials(settings) -> None:
+    """Write ``GOOGLE_SERVICE_ACCOUNT_JSON`` (e.g. a Cloud Run secret env var)
+    to the file path configured in ``GOOGLE_SERVICE_ACCOUNT_FILE`` so the
+    Google Docs exporter can read it without any code changes."""
+    json_value = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    target = settings.google_service_account_file.strip()
+    if not json_value or not target:
+        return
+    path = Path(target)
+    if not path.is_absolute():
+        path = BACKEND_DIR / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(json_value, encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        logger.info("Materialised Google service-account key to %s", path)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
+    materialize_google_credentials(settings)
     ensure_temp_dir(settings.temp_dir)
     AuthService(settings).ensure_superadmin()
     logger.info(

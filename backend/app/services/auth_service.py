@@ -1,10 +1,13 @@
-"""Authentication service: SQLite user store + JWT session management.
+"""Authentication service: user store + JWT session management.
 
 * Passwords are hashed with PBKDF2-HMAC-SHA256 (stdlib) — no compiled deps.
 * Sessions are stateless JWTs (HS256) signed with a per-deployment secret.
 * A default ``superadmin`` is seeded on first run so the system is never
   locked out; the password comes from ``SUPERADMIN_PASSWORD`` in ``.env`` or is
   randomly generated and printed to the logs once.
+* User persistence: SQLite (default, e.g. local dev) or PostgreSQL on Cloud
+  SQL when ``DATABASE_URL`` is set (e.g. Cloud Run). Both dialects share the
+  same schema and API.
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import parse_qs, urlparse
 
 from app.config import Settings
 from app.core.security import create_token, decode_token, generate_salt, hash_password, verify_password
@@ -27,24 +31,92 @@ class AuthError(RuntimeError):
     """Raised on bad credentials / validation failures (mapped to 4xx)."""
 
 
+def _parse_database_url(url: str) -> dict[str, Any]:
+    """Parse ``postgres+pg8000://user:pass@host:port/db`` or
+    ``postgres+pg8000://user:pass@/db?unix_sock=/cloudsql/.../.s.PGSQL.5432``."""
+    parsed = urlparse(url.strip())
+    query = parse_qs(parsed.query)
+    return {
+        "user": parsed.username or "",
+        "password": parsed.password or "",
+        "database": parsed.path.lstrip("/"),
+        "host": parsed.hostname,
+        "port": parsed.port or 5432,
+        "unix_sock": (query.get("unix_sock") or [""])[0] or None,
+    }
+
+
+def _pg_row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
+    """Map a pg8000 tuple row to a dict using the cursor description."""
+    columns = [d[0] for d in cur.description]
+    return dict(zip(columns, row))
+
+
 class UserStore:
-    """Tiny SQLite persistence for users (stdlib only)."""
+    """Tiny user persistence with two interchangeable backends:
 
-    def __init__(self, db_path: str) -> None:
-        path = Path(db_path)
-        if not path.is_absolute():
-            path = BACKEND_DIR / path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.db_path = str(path)
-        self._init_schema()
+    * SQLite (stdlib) when ``database_url`` is empty.
+    * PostgreSQL via pg8000 (pure-Python driver) when ``database_url`` is set.
+    """
 
-    def _connect(self) -> sqlite3.Connection:
+    def __init__(self, db_path: str, database_url: str = "") -> None:
+        self.is_postgres = bool(database_url.strip())
+        if self.is_postgres:
+            self._pg = _parse_database_url(database_url)
+            self.secret_dir = BACKEND_DIR / "data"
+            self.secret_dir.mkdir(parents=True, exist_ok=True)
+            self._init_pg_schema()
+        else:
+            path = Path(db_path)
+            if not path.is_absolute():
+                path = BACKEND_DIR / path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path = str(path)
+            self.secret_dir = path.parent
+            self._init_sqlite_schema()
+
+    # -- connection helpers ---------------------------------------------------
+    def _connect_sqlite(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _init_schema(self) -> None:
-        with self._connect() as conn:
+    def _connect_postgres(self):
+        import pg8000.dbapi
+
+        kwargs: dict[str, Any] = {
+            "user": self._pg["user"],
+            "password": self._pg["password"],
+            "database": self._pg["database"],
+            "timeout": 15,
+        }
+        if self._pg["unix_sock"]:
+            kwargs["unix_sock"] = self._pg["unix_sock"]
+        else:
+            kwargs["host"] = self._pg["host"] or "localhost"
+            kwargs["port"] = self._pg["port"] or 5432
+        conn = pg8000.dbapi.connect(**kwargs)
+        conn.autocommit = True  # each statement commits immediately
+        return conn
+
+    def _connect(self):
+        if self.is_postgres:
+            return self._connect_postgres()
+        return self._connect_sqlite()
+
+    @property
+    def ph(self) -> str:
+        """Parameter placeholder for the active dialect."""
+        return "%s" if self.is_postgres else "?"
+
+    def _row(self, cur: Any, row: Any) -> dict[str, Any]:
+        if self.is_postgres:
+            return _pg_row_to_dict(cur, row)
+        return dict(row)
+
+    # -- schema ---------------------------------------------------------------
+    def _init_sqlite_schema(self) -> None:
+        with self._connect_sqlite() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -63,9 +135,38 @@ class UserStore:
                 """
             )
 
+    def _init_pg_schema(self) -> None:
+        conn = self._connect_postgres()
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGSERIAL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    email TEXT NOT NULL DEFAULT '',
+                    password_hash TEXT NOT NULL,
+                    password_salt TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TEXT NOT NULL,
+                    last_login_at TEXT
+                )
+                """
+            )
+        finally:
+            conn.close()
+
+    # -- queries --------------------------------------------------------------
     def count_users(self) -> int:
-        with self._connect() as conn:
-            return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM users")
+            return int(cur.fetchone()[0])
+        finally:
+            conn.close()
 
     def create_user(
         self,
@@ -78,62 +179,127 @@ class UserStore:
     ) -> dict[str, Any]:
         salt = generate_salt()
         now = datetime.now(timezone.utc).isoformat()
-        with self._connect() as conn:
+        params = (
+            username,
+            display_name,
+            email,
+            hash_password(password, salt),
+            salt,
+            role,
+            True if self.is_postgres else 1,
+            bool(must_change_password),
+            now,
+        )
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
             try:
-                cur = conn.execute(
-                    """
-                    INSERT INTO users
-                        (username, display_name, email, password_hash, password_salt,
-                         role, is_active, must_change_password, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-                    """,
-                    (username, display_name, email, hash_password(password, salt), salt,
-                     role, int(must_change_password), now),
-                )
+                if self.is_postgres:
+                    cur.execute(
+                        """
+                        INSERT INTO users
+                            (username, display_name, email, password_hash, password_salt,
+                             role, is_active, must_change_password, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        params,
+                    )
+                    user_id = cur.fetchone()[0]
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO users
+                            (username, display_name, email, password_hash, password_salt,
+                             role, is_active, must_change_password, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        params,
+                    )
+                    user_id = cur.lastrowid
             except sqlite3.IntegrityError as exc:
                 raise AuthError("A user with that username already exists.") from exc
-            row = conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
-        return dict(row)
+            except Exception as exc:
+                if exc.__class__.__name__ == "IntegrityError":
+                    raise AuthError("A user with that username already exists.") from exc
+                raise
+            conn.commit()
+        finally:
+            conn.close()
+        return self.get_by_id(user_id)
 
     def get_by_username(self, username: str) -> Optional[dict[str, Any]]:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-        return dict(row) if row else None
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT * FROM users WHERE username = {self.ph}", (username,))
+            row = cur.fetchone()
+            return self._row(cur, row) if row else None
+        finally:
+            conn.close()
 
     def get_by_id(self, user_id: int) -> Optional[dict[str, Any]]:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        return dict(row) if row else None
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT * FROM users WHERE id = {self.ph}", (user_id,))
+            row = cur.fetchone()
+            return self._row(cur, row) if row else None
+        finally:
+            conn.close()
 
     def list_users(self) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM users ORDER BY username COLLATE NOCASE"
-            ).fetchall()
-        return [dict(r) for r in rows]
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            sql = (
+                "SELECT * FROM users ORDER BY lower(username)"
+                if self.is_postgres
+                else "SELECT * FROM users ORDER BY username COLLATE NOCASE"
+            )
+            cur.execute(sql)
+            return [self._row(cur, r) for r in cur.fetchall()]
+        finally:
+            conn.close()
 
     def update_user(self, user_id: int, fields: dict[str, Any]) -> Optional[dict[str, Any]]:
         allowed = {"display_name", "email", "role", "is_active"}
         updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
         if not updates:
             return self.get_by_id(user_id)
-        sets = ", ".join(f"{key} = ?" for key in updates)
-        with self._connect() as conn:
-            conn.execute(f"UPDATE users SET {sets} WHERE id = ?", (*updates.values(), user_id))
+        sets = ", ".join(f"{key} = {self.ph}" for key in updates)
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"UPDATE users SET {sets} WHERE id = {self.ph}", (*updates.values(), user_id))
+            conn.commit()
+        finally:
+            conn.close()
         return self.get_by_id(user_id)
 
     def set_password(self, user_id: int, new_password: str, must_change: bool = False) -> None:
         salt = generate_salt()
-        with self._connect() as conn:
-            conn.execute(
-                "UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = ? WHERE id = ?",
-                (hash_password(new_password, salt), salt, int(must_change), user_id),
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE users SET password_hash = {self.ph}, password_salt = {self.ph}, "
+                f"must_change_password = {self.ph} WHERE id = {self.ph}",
+                (hash_password(new_password, salt), salt, bool(must_change), user_id),
             )
+            conn.commit()
+        finally:
+            conn.close()
 
     def record_login(self, user_id: int) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        with self._connect() as conn:
-            conn.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (now, user_id))
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"UPDATE users SET last_login_at = {self.ph} WHERE id = {self.ph}", (now, user_id))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 class AuthService:
@@ -141,7 +307,7 @@ class AuthService:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.store = UserStore(settings.auth_db_path)
+        self.store = UserStore(settings.auth_db_path, settings.database_url)
         self._secret: Optional[str] = None
 
     @property
@@ -153,7 +319,7 @@ class AuthService:
     def _resolve_secret(self) -> str:
         if self.settings.jwt_secret.strip():
             return self.settings.jwt_secret.strip()
-        secret_file = Path(self.store.db_path).parent / ".jwt_secret"
+        secret_file = self.store.secret_dir / ".jwt_secret"
         if secret_file.exists():
             return secret_file.read_text(encoding="utf-8").strip()
         secret = secrets.token_hex(32)

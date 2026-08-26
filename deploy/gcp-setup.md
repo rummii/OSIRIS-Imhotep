@@ -1,8 +1,129 @@
-# Google Cloud deployment — OSIRIS Imhotep
+# Google Cloud deployment — OSIRIS Imhotep (Cloud Run + GitHub Actions)
 
-Recommended architecture: one small Compute Engine VM running Docker Compose
-(backend + frontend + Caddy TLS proxy). SQLite and the Google credential file
-persist on the VM's disk via bind-mounted volumes.
+Recommended architecture: **two Cloud Run services** (backend FastAPI, frontend
+Next.js) deployed automatically from GitHub on every push to `main`. Users
+persist in **Cloud SQL (PostgreSQL)**; secrets live in **Secret Manager**; GitHub
+authenticates to GCP with **Workload Identity Federation** (keyless — no
+service-account JSON stored in GitHub).
+
+```
+git push main ─► GitHub Actions (.github/workflows/deploy.yml)
+                   ├─ test: pip install + backend smoke/endpoint tests
+                   ├─ build & push both images ─► Artifact Registry (us-central1)
+                   ├─ deploy backend  ─► Cloud Run "osiris-backend"
+                   │     • Cloud SQL via unix socket (/cloudsql/...)
+                   │     • secrets: DeepSeek, Gemini, JWT, superadmin pw, DB URL,
+                   │       Google SA key (materialised to a file at startup)
+                   ├─ deploy frontend ─► Cloud Run "osiris-frontend"
+                   │     • BACKEND_URL → backend service URL
+                   ├─ CORS_ORIGINS on backend ← frontend URL
+                   └─ smoke-test /api/health + frontend /
+```
+
+---
+
+## 1. One-time GCP bootstrap (Cloud Shell — 1 run)
+
+Open <https://cloud.google.com/shell> and run:
+
+```bash
+bash <(curl -s https://raw.githubusercontent.com/rummii/OSIRIS-Imhotep/main/deploy/bootstrap.sh)
+```
+
+or, from a clone of the repo in Cloud Shell:
+
+```bash
+bash deploy/bootstrap.sh
+```
+
+The script (idempotent) will:
+
+1. Use/create your GCP **project** (`GCP_PROJECT_ID`, billing enabled).
+2. Enable the required APIs.
+3. Create Artifact Registry repo `osiris-images`.
+4. Create Cloud SQL `osiris-db` (Postgres 16, smallest dev tier `db-f1-micro`,
+   ~$7–10/mo; falls back to `db-custom-1-3840`) with database `osiris` and
+   user `osiris`.
+5. Prompt for your **DeepSeek** and **Gemini** API keys, then store everything
+   in Secret Manager: `deepseek-api-key`, `gemini-api-key`, `jwt-secret`,
+   `superadmin-password`, `database-url`, `gdoc-sa-key`.
+6. Create the Google Docs exporter SA (`osiris-gdoc-sa`) and upload its key to
+   the `gdoc-sa-key` secret.
+7. Create `osiris-deploy-sa` (GitHub deployer) and `osiris-backend-sa` (runtime),
+   then Wire Workload Identity Federation for **this** repo's `main` branch.
+8. Print the **3 values** to store as GitHub Actions secrets.
+
+> The Cloud SQL instance takes ~5–10 minutes to provision the first time.
+
+## 2. Add the GitHub Actions secrets
+
+Go to **https://github.com/rummii/OSIRIS-Imhotep/settings/secrets/actions**
+and add the values printed by the bootstrap:
+
+| Secret name      | Value from bootstrap |
+| ---------------- | -------------------- |
+| `GCP_PROJECT_ID` | your project id      |
+| `GCP_WIF_PROVIDER`| `projects/<number>/locations/global/workloadIdentityPools/osiris-github-pool/providers/osiris-github-provider` |
+| `GCP_DEPLOY_SA`  | `osiris-deploy-sa@<project>.iam.gserviceaccount.com` |
+
+## 3. Deploy
+
+That's it — **push to `main`** and the workflow runs test → build → deploy → smoke test.
+
+```bash
+git add .
+git commit -m "deploy: ..."
+git push origin main
+```
+
+Watch it at **https://github.com/rummii/OSIRIS-Imhotep/actions**.
+
+## 4. First login
+
+The backend seeds `admin` on first boot. Get the password:
+
+```bash
+gcloud secrets versions access latest --secret=superadmin-password
+```
+
+Open the frontend URL printed in the workflow log and log in. Change the
+password on first login (Account page).
+
+## 5. Costs (us-central1, dev sizing)
+
+| Item                       | Approx. cost        |
+| -------------------------- | ------------------- |
+| Cloud Run (scales to zero) | $0 when idle        |
+| Cloud SQL `db-f1-micro`    | ~$7–10/mo           |
+| Artifact Registry + APIs   | negligible          |
+| DeepSeek / Gemini          | external API usage  |
+
+## Updating / rollback
+
+- **Update:** push to `main` — workflow rebuilds and redeploys both services.
+- **Rollback:** in the Cloud Run console select a previous revision and *Manage traffic*.
+- **Scale to zero savings:** both services already have `min-instances=0`; cold
+  starts take a few seconds (OpenCV import) — acceptable for development.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Workflow auth fails (`Invalid OIDC token` / permission) | Confirm the 3 secrets exist and the WIF provider condition matches `main`; re-run `deploy/bootstrap.sh` |
+| `login` returns 401 after deploy | Backend seeds `admin` only when the users table is empty; if you redeployed with a different `SUPERADMIN_PASSWORD`, access the secret and use that password, or delete rows from the `osiris` DB |
+| `/api/health` unreachable | Confirm `--allow-unauthenticated`; check Cloud Run logs for startup errors |
+| Google Docs export 503 | Set the `gdoc-sa-key` secret (bootstrap step 6) and redeploy |
+| 502 on SOW generation | Check Cloud Run logs: DeepSeek/Gemini keys, or request timeout (>600s) — check `backend` service timeout |
+
+---
+
+# Legacy: single Compute Engine VM + docker-compose (optional, not recommended)
+
+Kept for reference. Old flow: build/upload from this PC with
+`deploy/gcp-deploy-local.ps1`, run `docker compose up -d` behind Caddy. Requires
+`gcloud` CLI + Docker locally and an always-on ~$13/mo VM. The modern flow above
+(Cloud Run) is cheaper, auto-scaling, and fully driven by the GitHub repo.
+
 
 ---
 

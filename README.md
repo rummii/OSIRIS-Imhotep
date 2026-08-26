@@ -190,7 +190,29 @@ Standalone smoke tests live in `backend/` (run them from `backend/` with the ven
 End-to-end flow (manual): start the backend, then in a second PowerShell
 terminal run `cd frontend` followed by `npm.cmd run dev`.
 
-## 8. Notes & limitations
+## 8. Deployment (Google Cloud Run + GitHub Actions)
+
+Pushing to `main` triggers a GitHub Actions workflow that tests the backend,
+builds both Docker images, pushes them to Artifact Registry, and deploys two
+Cloud Run services (FastAPI backend + Next.js frontend) with:
+
+- **Cloud SQL (PostgreSQL)** for persistent logins (SQLite remains the local
+  dev default — set `DATABASE_URL` to switch).
+- **Secret Manager** for API keys, JWT secret, superadmin password, the DB URL,
+  and the Google Docs service-account key.
+- **Workload Identity Federation** — GitHub authenticates to GCP without any
+  stored service-account keys.
+
+One-time setup (Cloud Shell, ~10 min):
+
+```bash
+bash deploy/bootstrap.sh     # or: bash <(curl -s https://raw.githubusercontent.com/rummii/OSIRIS-Imhotep/main/deploy/bootstrap.sh)
+```
+
+Then add the 3 printed values as GitHub Actions secrets and push. Full walkthrough,
+costs, rollback and troubleshooting: **`deploy/gcp-setup.md`**.
+
+## 9. Notes & limitations
 
 - Gemini Vision supplies evidence only; DeepSeek remains responsible for the
   final structured SOW. Both API keys are required for requests containing media.
