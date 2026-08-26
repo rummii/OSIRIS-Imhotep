@@ -1,0 +1,14 @@
+# TOKEN EFFICIENCY & DEV GUIDELINES
+
+## 1. COMMUNICATION & OUTPUT
+* **Be direct and extremely concise.** Omit introductory filler, explanations of what you are about to do, conversational fluff, and redundant post-execution summaries.
+* **Minimal token usage is top priority.** Show only necessary code diffs or targeted snippets rather than reprinting entire unmodified files.
+
+## 2. PRE-EXECUTION THOUGHT PROCESS
+* **Think deeply before taking action.** Perform a complete diagnostic plan internally before running terminal commands or modifying files.
+* **Identify root causes first.** Do not execute trial-and-error commands or make speculative code changes. Verify assumptions systematically before writing code.
+
+## 3. SURGICAL MODIFICATIONS
+* **Target exact lines/functions.** Modify only the specific code causing the issue. NEVER rewrite entire files, refactor unrelated modules, or recreate components to fix localized bugs.
+* **Preserve existing structures.** Retain working logic, imports, formatting, and surrounding architecture unless explicitly instructed to refactor.
+* **Zero repetitions.** Do not re-run failed commands or apply identical patches repeatedly. If a change fails, stop, reassess the failure output, and change course.

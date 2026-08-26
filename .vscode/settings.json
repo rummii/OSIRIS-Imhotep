@@ -1,0 +1,30 @@
+{
+  // ---- Python / Pylance: point at the project venv -------------------------
+  // (The venv lives in backend/.venv, which VS Code doesn't auto-detect,
+  //  so Pylance falls back to the global interpreter -> "Import could not be
+  //  resolved" squiggles. This fixes that.)
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": ["${workspaceFolder}/backend"],
+  "python.analysis.typeCheckingMode": "basic",
+
+  // ---- TypeScript: use the project's compiler for the Next.js app ----------
+  "typescript.tsdk": "${workspaceFolder}/frontend/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // ---- CSS: Tailwind @tailwind/@apply are not standard CSS at-rules --------
+  // The Tailwind CSS IntelliSense extension (see extensions.json) provides the
+  // canonical support; this silences the built-in CSS linter's false positives.
+  "css.lint.unknownAtRules": "ignore",
+
+  // ---- Keep the editor tidy --------------------------------------------------
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "backend/tmp_uploads": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.venv": true,
+    "**/.next": true
+  }
+}

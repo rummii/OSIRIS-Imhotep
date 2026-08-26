@@ -1,0 +1,19 @@
+# OSIRIS Imhotep — Caddyfile (auto-HTTPS via Let's Encrypt)
+# Replace yourdomain.com with your real domain (or use an IP placeholder during testing).
+yourdomain.com {
+    encode zstd gzip
+
+    # API goes to FastAPI (uvicorn :8000); allow up to 300s for AI calls.
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            transport http {
+                response_header_timeout 300s
+            }
+        }
+    }
+
+    # Everything else goes to Next.js (:3000).
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

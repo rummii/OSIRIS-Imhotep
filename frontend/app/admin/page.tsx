@@ -1,0 +1,252 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, KeyRound, Plus, Shield, UserPlus, Users } from "lucide-react";
+import {
+  adminCreateUser,
+  adminListUsers,
+  adminResetPassword,
+  adminUpdateUser,
+} from "@/lib/api";
+import { clearAuth, getCachedUser, getToken, type SessionUser } from "@/lib/auth";
+
+interface AdminUser {
+  id: number;
+  username: string;
+  display_name?: string;
+  email?: string;
+  role: string;
+  is_active: boolean;
+  must_change_password?: boolean;
+  created_at?: string;
+}
+
+export default function AdminPage() {
+  const router = useRouter();
+  const [me, setMe] = useState<SessionUser | null>(null);
+
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [form, setForm] = useState({ username: "", display_name: "", email: "", role: "user", password: "" });
+  const [creating, setCreating] = useState(false);
+  const [resetFor, setResetFor] = useState<number | null>(null);
+  const [resetPw, setResetPw] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setUsers((await adminListUsers()) as unknown as AdminUser[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load users");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!getToken() || getCachedUser()?.role !== "superadmin") {
+      router.replace("/");
+      return;
+    }
+    setMe(getCachedUser());
+    void load();
+  }, [load, router]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setCreating(true);
+    try {
+      await adminCreateUser({ ...form, must_change_password: true });
+      setNotice(`User "${form.username}" created. They must change the password on first login.`);
+      setForm({ username: "", display_name: "", email: "", role: "user", password: "" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create user");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const toggleActive = async (user: AdminUser) => {
+    try {
+      await adminUpdateUser(user.id, { is_active: !user.is_active });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    }
+  };
+
+  const doReset = async (user: AdminUser) => {
+    if (!resetPw) return;
+    try {
+      await adminResetPassword(user.id, resetPw);
+      setNotice(`Password for "${user.username}" reset — they must change it at next login.`);
+      setResetFor(null);
+      setResetPw("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    }
+  };
+
+
+        {/* Onboard user */}
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center gap-2">
+            <UserPlus size={16} className="text-slate-400" />
+            <h2 className="text-sm font-semibold text-slate-900">Onboard new user</h2>
+          </div>
+          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <input required placeholder="Username" value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            <input placeholder="Display name" value={form.display_name}
+              onChange={(e) => setForm({ ...form, display_name: e.target.value })}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            <input type="email" placeholder="Email" value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600">
+              <option value="user">User</option>
+              <option value="superadmin">Superadmin</option>
+            </select>
+            <input required placeholder="Temp password (min 8)" value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            <button type="submit" disabled={creating}
+              className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-40">
+              <Plus size={15} /> {creating ? "Creating…" : "Create"}
+            </button>
+          </form>
+        </section>
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+        <div className="mx-auto flex max-w-5xl items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-md bg-slate-900">
+              <Shield size={17} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-slate-950">User management</h1>
+              <p className="text-[11px] text-slate-500">Superadmin · onboard and manage access</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => router.replace("/")}
+            className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900">
+            <ArrowLeft size={16} /> Back
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl px-4 py-6 space-y-6 sm:px-6">
+        {error && (
+          <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">{error}</p>
+        )}
+        {notice && (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{notice}</p>
+        )}
+
+
+        {/* Users table */}
+        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+            <Users size={15} className="text-slate-400" />
+            <h2 className="text-sm font-semibold text-slate-900">Users ({users.length})</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-slate-100 text-[11px] uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th className="px-5 py-2">User</th>
+                  <th className="px-3 py-2">Role</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Created</th>
+                  <th className="px-5 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {users.map((user) => (
+                  <tr key={user.id} className={user.is_active ? "" : "opacity-50"}>
+                    <td className="px-5 py-3">
+                      <p className="font-medium text-slate-900">{user.display_name || user.username}</p>
+                      <p className="text-xs text-slate-400">
+                        @{user.username}
+                        {user.email ? ` · ${user.email}` : ""}
+                      </p>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${user.role === "superadmin" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}>
+                        {user.role}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs">
+                      {user.is_active ? (
+                        <span className="text-emerald-600">Active</span>
+                      ) : (
+                        <span className="text-red-500">Disabled</span>
+                      )}
+                      {user.must_change_password && (
+                        <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">pw reset</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-500">
+                      {user.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}
+                    </td>
+                    <td className="px-5 py-3 text-right whitespace-nowrap">
+                      {resetFor === user.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <input
+                            type="password"
+                            placeholder="New password"
+                            value={resetPw}
+                            onChange={(e) => setResetPw(e.target.value)}
+                            className="w-40 rounded-md border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-600"
+                          />
+                          <button type="button" onClick={() => doReset(user)}
+                            className="rounded bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700">
+                            Save
+                          </button>
+                          <button type="button"
+                            onClick={() => { setResetFor(null); setResetPw(""); }}
+                            className="text-xs text-slate-400 hover:text-slate-700">
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <button type="button" onClick={() => { setResetFor(user.id); setResetPw(""); }}
+                            className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
+                            title="Reset password">
+                            <KeyRound size={13} /> Reset
+                          </button>
+                          {user.username !== me?.username && (
+                            <button type="button" onClick={() => toggleActive(user)}
+                              className="text-xs text-slate-500 hover:text-red-600"
+                              title={user.is_active ? "Deactivate" : "Activate"}>
+                              {user.is_active ? "Deactivate" : "Activate"}
+                            </button>
+                          )}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <div className="flex justify-end">
+          <button type="button"
+            onClick={() => { clearAuth(); router.replace("/login"); }}
+            className="text-xs text-slate-400 hover:text-red-600">
+            Sign out
+          </button>
+        </div>
+      </main>
+    </div>
+  );
+}

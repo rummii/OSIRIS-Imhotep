@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-white text-slate-900 antialiased;
+  font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+}
+
+/* Slim scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400;
+}
+
+@layer components {
+  .card {
+    @apply border border-slate-200 bg-white rounded-lg;
+  }
+  .input-chip {
+    @apply border border-slate-300 bg-white text-slate-900 placeholder-slate-400
+      text-xs px-3 py-1.5 rounded-md outline-none focus:border-blue-600 focus:ring-2
+      focus:ring-blue-100 transition;
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white
+      font-semibold text-sm px-4 py-2 rounded-md transition disabled:opacity-40
+      disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 border border-slate-300 hover:border-slate-400
+      hover:bg-slate-50 text-slate-700 text-sm px-3 py-2 rounded-md transition
+      disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+}
+
+.report-surface .text-slate-100,
+.report-surface .text-slate-200,
+.report-surface .text-slate-300 { color: #172033 !important; }
+.report-surface .text-slate-400 { color: #475569 !important; }
+.report-surface .text-slate-500,
+.report-surface .text-slate-600 { color: #64748b !important; }
+.report-surface .border-slate-800,
+.report-surface .divide-slate-800\/70 { border-color: #e2e8f0 !important; }
+.report-surface .bg-slate-950\/40,
+.report-surface .bg-slate-800\/70 { background-color: #f8fafc !important; }
+.report-surface .text-amber-300,
+.report-surface .text-amber-400,
+.report-surface .text-amber-500 { color: #2563eb !important; }
+.report-surface .bg-amber-400\/10 { background-color: #eff6ff !important; }
+.report-surface .border-amber-400\/30 { border-color: #bfdbfe !important; }

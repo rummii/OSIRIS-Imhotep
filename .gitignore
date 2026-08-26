@@ -1,0 +1,34 @@
+# Dependencies / build output
+node_modules/
+.next/
+.venv/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+dist/
+build/
+
+# Env & secrets
+.env
+.env.local
+.env*.local
+credentials/
+backend/credentials/
+*.pem
+*service-account*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Runtime artifacts
+backend/tmp_uploads/
+backend/data/
+*.log
+
+# Debug / scratch output
+_*.txt

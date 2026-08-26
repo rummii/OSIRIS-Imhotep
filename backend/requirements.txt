@@ -1,0 +1,26 @@
+# --- Web framework ---
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+python-multipart>=0.0.9
+
+# --- Validation / settings ---
+pydantic>=2.9,<3.0
+pydantic-settings>=2.6,<3.0
+python-dotenv>=1.0,<2.0
+email-validator>=2.2,<3.0
+
+# --- DeepSeek API (OpenAI-compatible) ---
+openai>=1.0,<2.0
+
+# --- Gemini vision API ---
+google-genai>=1.0,<2.0
+
+# --- Media processing (images + video frame sampling) ---
+opencv-python-headless>=4.9,<5.0
+numpy>=1.24,<3.0
+
+# --- Google Docs / Drive export ---
+google-api-python-client>=2.155,<3.0
+google-auth>=2.37,<3.0
+google-auth-httplib2>=0.2.0,<1.0
+google-auth-oauthlib>=1.2,<2.0
