@@ -1,5 +1,10 @@
 ﻿# OSIRIS Imhotep - Backend (FastAPI)
 # Multi-stage build: builder (with gcc) -> slim runtime (no gcc)
+# Image layout (final stage):
+#   /app/
+#     app/                 <- Python package (main.py, config.py, api/, core/, ...)
+#     requirements.txt     <- for traceability
+#   /home/appuser/.local/  <- pip packages
 
 FROM python:3.11-slim AS builder
 
@@ -30,10 +35,13 @@ RUN groupadd --gid 1001 appgroup \
 # Copy installed packages
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code
-COPY --chown=appuser:appgroup backend/ ./app/
+# Copy backend CONTENTS (not the directory) so ./app/main.py lands at /app/app/main.py
+COPY --chown=appuser:appgroup backend/ ./
 
-ENV PATH=/home/appuser/.local/bin:
+# Put pip-installed binaries (uvicorn, etc.) on PATH
+ENV PATH=/home/appuser/.local/bin:$PATH
+# Make /app importable in case any sub-module does relative-from-root
+ENV PYTHONPATH=/app
 
 USER appuser
 
