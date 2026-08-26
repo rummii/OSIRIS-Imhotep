@@ -87,8 +87,8 @@ class UserStore:
         self.is_postgres = bool(database_url.strip())
         if self.is_postgres:
             self._pg = _parse_database_url(database_url)
-            self.secret_dir = BACKEND_DIR / "data"
-            self.secret_dir.mkdir(parents=True, exist_ok=True)
+            # /tmp is the only writable area in Cloud Run (tmpfs). Override the hardcoded backend/ path.
+            self.secret_dir = Path("/tmp/app-data")
             self._init_pg_schema()
         else:
             path = Path(db_path)
@@ -447,3 +447,4 @@ class AuthService:
             "created_at": user["created_at"],
             "last_login_at": user.get("last_login_at"),
         }
+

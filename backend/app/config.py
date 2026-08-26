@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     max_upload_mb: int = 50
     max_video_frames: int = 6
-    temp_dir: str = "tmp_uploads"
+    temp_dir: str = "/tmp/tmp_uploads"  # writable in Cloud Run (/tmp is tmpfs); ignored when local dev sets TEMP_DIR
 
     # --- Future RAG plug-in (see services/rag_provider.py) ---
     rag_provider: str = "null"  # "null" | "vector"
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # --- Auth (SSO login gate) ---
     jwt_secret: str = ""                       # leave empty to auto-generate + persist
-    auth_db_path: str = "data/users.db"
+    auth_db_path: str = "/tmp/users.db"        # writable in Cloud Run; ignored when local dev sets AUTH_DB_PATH
     database_url: str = ""                     # empty -> SQLite; else postgres+pg8000://...
     token_expiry_hours: int = 12
     superadmin_username: str = "admin"
