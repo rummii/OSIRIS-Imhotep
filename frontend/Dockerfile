@@ -12,13 +12,13 @@ WORKDIR /app
 
 # Build-time args (passed via --build-arg)
 # NEXT_PUBLIC_* vars are baked into the JS bundle at build time.
-# BACKEND_URL is baked into next.config.js at build time.
+# BACKEND_URL is read by next.config.js rewrites() at build time.
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_BACKEND_URL
 ARG BACKEND_URL
-ENV NEXT_PUBLIC_API_URL=
-ENV NEXT_PUBLIC_BACKEND_URL=
-ENV BACKEND_URL=
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
+ENV BACKEND_URL=${BACKEND_URL}
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ ./
