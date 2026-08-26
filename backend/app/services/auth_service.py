@@ -118,6 +118,8 @@ class UserStore:
         # --- Cloud SQL unix-socket path (production default) -------------------
         if self._pg.get("unix_sock"):
             kwargs["unix_sock"] = self._pg["unix_sock"]
+            # Unix sockets don't need SSL — Cloud SQL is VPC-private
+            kwargs.pop("ssl", None)
             conn = pg8000.dbapi.connect(**kwargs)
             conn.autocommit = True
             return conn
