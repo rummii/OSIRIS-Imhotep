@@ -3,7 +3,7 @@
 # Image layout (final stage):
 #   /app/
 #     app/                 <- Python package (main.py, config.py, api/, core/, ...)
-#     requirements.txt     <- for traceability
+#     requirements.txt
 #   /home/appuser/.local/  <- pip packages
 
 FROM python:3.11-slim AS builder
@@ -35,19 +35,21 @@ RUN groupadd --gid 1001 appgroup \
 # Copy installed packages
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy backend CONTENTS (not the directory) so ./app/main.py lands at /app/app/main.py
+# Copy backend/ CONTENTS into /app/ so backend/app/main.py -> /app/app/main.py
+# Trailing slash on SOURCE (backend/) is critical: it means "contents of backend/"
 COPY --chown=appuser:appgroup backend/ ./
 
-# Put pip-installed binaries (uvicorn, etc.) on PATH
+# Put pip binaries (uvicorn) on PATH + make /app importable
 ENV PATH=/home/appuser/.local/bin:$PATH
-# Make /app importable in case any sub-module does relative-from-root
 ENV PYTHONPATH=/app
 
 USER appuser
 
-EXPOSE 8000
+# Cloud Run probes port 8080 by default; align with that
+EXPOSE 8080
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# uvicorn listens on 8080 to match Cloud Run health check
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
