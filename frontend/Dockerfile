@@ -10,11 +10,11 @@ RUN npm ci --no-audit --no-fund
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Public env vars baked at build time
+# Build-time args (passed via --build-arg)
+# NEXT_PUBLIC_* vars are baked into the JS bundle at build time.
+# BACKEND_URL is baked into next.config.js at build time.
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_BACKEND_URL
-# Private URL used by next.config.js rewrites() -- must be set at build time
-# because the Next.js config is evaluated during `next build`.
 ARG BACKEND_URL
 ENV NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_BACKEND_URL=
@@ -34,6 +34,9 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# BACKEND_URL must be set here too (not just in builder) so the standalone
+# server can read it at runtime.  Override at deploy time with --set-env-vars.
+ENV BACKEND_URL=https://osiris-imhotep-890958491914.europe-west1.run.app
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser  --system --uid 1001 --ingroup nodejs nextjs
