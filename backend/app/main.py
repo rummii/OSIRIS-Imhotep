@@ -24,24 +24,29 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent  # backend/
 
 
 def materialize_google_credentials(settings) -> None:
-    """Write ``GOOGLE_SERVICE_ACCOUNT_JSON`` (e.g. a Cloud Run secret env var)
-    to the file path configured in ``GOOGLE_SERVICE_ACCOUNT_FILE`` so the
-    Google Docs exporter can read it without any code changes."""
-    json_value = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    target = settings.google_service_account_file.strip()
-    if not json_value or not target:
-        return
-    path = Path(target)
-    if not path.is_absolute():
-        path = BACKEND_DIR / path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(json_value, encoding="utf-8")
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-        logger.info("Materialised Google service-account key to %s", path)
+    """Write ``GOOGLE_SERVICE_ACCOUNT_JSON`` / ``GOOGLE_OAUTH_TOKEN_JSON``
+    (Cloud Run secret env vars) to the file paths configured in
+    ``GOOGLE_SERVICE_ACCOUNT_FILE`` / ``GOOGLE_OAUTH_TOKEN_FILE`` so the
+    Google Docs exporter can read them without any code changes."""
+    for env_name, target_name in (
+        ("GOOGLE_SERVICE_ACCOUNT_JSON", "google_service_account_file"),
+        ("GOOGLE_OAUTH_TOKEN_JSON", "google_oauth_token_file"),
+    ):
+        json_value = os.environ.get(env_name, "").strip()
+        target = getattr(settings, target_name, "").strip()
+        if not json_value or not target:
+            continue
+        path = Path(target)
+        if not path.is_absolute():
+            path = BACKEND_DIR / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text(json_value, encoding="utf-8")
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
+            logger.info("Materialised %s to %s", env_name, path)
 
 
 @asynccontextmanager

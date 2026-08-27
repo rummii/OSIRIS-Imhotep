@@ -1,0 +1,38 @@
+# Minimal build config - NO secret substitutions (avoids the stale-trigger
+# `_DATABASE_URL`/`_JWT_SECRET` rejection). Builds + pushes both images.
+# Pass --substitutions=_TAG=<git short sha> (gcloud can't derive SHORT_SHA
+# when .git/ is excluded from the upload).
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-backend"
+    args:
+      - "build"
+      - "-t"
+      - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
+      - "-t"
+      - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:latest"
+      - "-f"
+      - "Dockerfile.backend"
+      - "."
+
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-frontend"
+    args:
+      - "build"
+      - "-t"
+      - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:${_TAG}"
+      - "-t"
+      - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:latest"
+      - "-f"
+      - "frontend/Dockerfile"
+      - "."
+
+images:
+  - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
+  - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:latest"
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:${_TAG}"
+  - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:latest"
+
+options:
+  machineType: "E2_HIGHCPU_8"
+  logging: "CLOUD_LOGGING_ONLY"

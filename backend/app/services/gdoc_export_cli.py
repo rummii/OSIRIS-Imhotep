@@ -51,7 +51,18 @@ def main() -> int:
     except GdocNotConfiguredError as exc:
         result = {"ok": False, "error": str(exc), "status": 503}
     except Exception as exc:
-        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        msg = f"{type(exc).__name__}: {exc}"
+        # Google blocks service accounts from creating Docs in standalone
+        # (non-Workspace) projects. Surface a clear, actionable message.
+        if "403" in str(exc) and ("permission" in str(exc).lower()):
+            msg += (
+                " — The Google service account cannot create Docs in this project "
+                "(the Docs API does not support service accounts outside a Google "
+                "Workspace domain). Configure a user OAuth token instead: "
+                "run `python deploy/setup_oauth_token.py` locally and store the "
+                "result at GOOGLE_OAUTH_TOKEN_FILE."
+            )
+        result = {"ok": False, "error": msg}
         traceback.print_exc(file=sys.stderr)
 
     try:
