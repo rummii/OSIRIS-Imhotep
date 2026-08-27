@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, HardHat, LogOut, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { AlertTriangle, FileText, HardHat, LogOut, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import ChatInput, { type ChatSubmission } from "@/components/ChatInput";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import SowReport from "@/components/SowReport";
@@ -114,6 +114,13 @@ export default function Home() {
               Admin
             </Link>
           )}
+          <Link
+            href="/documents"
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-500 hover:border-emerald-300 hover:text-emerald-700 transition"
+          >
+            <FileText size={12} />
+            Documents
+          </Link>
           <Link
             href="/account"
             className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-slate-500 hover:border-blue-300 hover:text-blue-700 transition"

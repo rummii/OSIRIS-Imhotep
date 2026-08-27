@@ -1,0 +1,541 @@
+"""SOW document persistence: save, list, update, delete, and export.
+
+Documents are stored locally in the same SQLite/Postgres DB as the user table,
+so they travel together and are cleaned up automatically when a user is deleted.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from app.config import Settings
+from app.models.schemas import SowResponse
+
+logger = logging.getLogger("osiris.sow")
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent  # backend/
+
+
+# ---------------------------------------------------------------------------
+# SowStore - low-level CRUD against SQLite or Postgres
+# ---------------------------------------------------------------------------
+
+class SowStore:
+    """SQLite (default) or Postgres CRUD for ``sow_documents``."""
+
+    def __init__(self, db_path: str, database_url: str = "") -> None:
+        self.is_postgres = bool(database_url.strip())
+        if self.is_postgres:
+            from app.services.auth_service import _parse_database_url
+            self._pg = _parse_database_url(database_url)
+            self._init_pg_schema()
+        else:
+            self.db_path = Path(db_path)
+            if not self.db_path.is_absolute():
+                self.db_path = BACKEND_DIR / self.db_path
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_sqlite_schema()
+
+    @property
+    def secret_dir(self) -> Path:
+        if self.is_postgres:
+            return Path("/tmp/app-data")
+        return BACKEND_DIR / ".secrets"
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def _pg_conn(self):
+        import pg8000
+        opts = self._pg
+        return pg8000.connect(
+            user=opts["user"],
+            password=opts["password"],
+            database=opts["database"],
+            host=opts["host"] or "localhost",
+            port=opts["port"] or 5432,
+            unix_sock=opts.get("unix_sock") or None,
+            ssl=opts["sslmode"] is not None,
+        )
+
+    def _init_sqlite_schema(self) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS sow_documents (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id       INTEGER NOT NULL,
+                    sow_id        INTEGER,
+                    title         TEXT NOT NULL,
+                    content_md    TEXT NOT NULL,
+                    content_plain TEXT NOT NULL,
+                    is_published  INTEGER NOT NULL DEFAULT 0,
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )"""
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sow_user ON sow_documents(user_id)")
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _init_pg_schema(self) -> None:
+        conn = self._pg_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS sow_documents (
+                    id            SERIAL PRIMARY KEY,
+                    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    sow_id        INTEGER,
+                    title         TEXT NOT NULL,
+                    content_md    TEXT NOT NULL,
+                    content_plain TEXT NOT NULL,
+                    is_published  INTEGER NOT NULL DEFAULT 0,
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL
+                )"""
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sow_user ON sow_documents(user_id)")
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def _pg_row_to_dict(cur, row) -> dict[str, Any]:
+        if row is None:
+            return {}
+        columns = [d[0] for d in cur.description]
+        return dict(zip(columns, row))
+
+    def create(
+        self,
+        user_id: int,
+        title: str,
+        content_md: str,
+        content_plain: str,
+        sow_id: int | None = None,
+        is_published: bool = False,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        if self.is_postgres:
+            conn = self._pg_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """INSERT INTO sow_documents
+                       (user_id, sow_id, title, content_md, content_plain, is_published, created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       RETURNING *""",
+                    (user_id, sow_id, title, content_md, content_plain,
+                     1 if is_published else 0, now, now),
+                )
+                row = cur.fetchone()
+                conn.commit()
+                return self._pg_row_to_dict(cur, row) if row else {}
+            finally:
+                cur.close()
+                conn.close()
+        else:
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO sow_documents "
+                    "(user_id, sow_id, title, content_md, content_plain, is_published, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (user_id, sow_id, title, content_md, content_plain,
+                     1 if is_published else 0, now, now),
+                )
+                doc_id = cur.lastrowid
+                conn.commit()
+                return self.get(doc_id) or {}
+            finally:
+                conn.close()
+
+
+    def get(self, doc_id: int, owner_id: int | None = None) -> dict[str, Any] | None:
+        if self.is_postgres:
+            conn = self._pg_conn()
+            try:
+                cur = conn.cursor()
+                if owner_id is not None:
+                    cur.execute(
+                        "SELECT * FROM sow_documents WHERE id=%s AND user_id=%s",
+                        (doc_id, owner_id),
+                    )
+                else:
+                    cur.execute("SELECT * FROM sow_documents WHERE id=%s", (doc_id,))
+                row = cur.fetchone()
+                return self._pg_row_to_dict(cur, row) if row else None
+            finally:
+                cur.close()
+                conn.close()
+        else:
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                if owner_id is not None:
+                    cur.execute(
+                        "SELECT * FROM sow_documents WHERE id=? AND user_id=?",
+                        (doc_id, owner_id),
+                    )
+                else:
+                    cur.execute("SELECT * FROM sow_documents WHERE id=?", (doc_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def list_for_user(self, user_id: int) -> list[dict[str, Any]]:
+        if self.is_postgres:
+            conn = self._pg_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM sow_documents WHERE user_id=%s ORDER BY created_at DESC",
+                    (user_id,),
+                )
+                return [self._pg_row_to_dict(cur, r) for r in cur.fetchall()]
+            finally:
+                cur.close()
+                conn.close()
+        else:
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM sow_documents WHERE user_id=? ORDER BY created_at DESC",
+                    (user_id,),
+                )
+                return [dict(r) for r in cur.fetchall()]
+            finally:
+                conn.close()
+
+    def list_all(self) -> list[dict[str, Any]]:
+        if self.is_postgres:
+            conn = self._pg_conn()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM sow_documents ORDER BY created_at DESC")
+                return [self._pg_row_to_dict(cur, r) for r in cur.fetchall()]
+            finally:
+                cur.close()
+                conn.close()
+        else:
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM sow_documents ORDER BY created_at DESC")
+                return [dict(r) for r in cur.fetchall()]
+            finally:
+                conn.close()
+
+
+    def update(
+        self, doc_id: int, owner_id: int | None, fields: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if not fields:
+            return self.get(doc_id, owner_id)
+        fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+        fields.pop("user_id", None)
+        fields.pop("id", None)
+        fields.pop("created_at", None)
+        if "is_published" in fields:
+            fields["is_published"] = 1 if fields["is_published"] else 0
+
+        if self.is_postgres:
+            conn = self._pg_conn()
+            try:
+                cur = conn.cursor()
+                set_clause = ", ".join([f"{k}=%s" for k in fields])
+                values = list(fields.values())
+                if owner_id is not None:
+                    cur.execute(
+                        f"UPDATE sow_documents SET {set_clause} WHERE id=%s AND user_id=%s",
+                        (*values, doc_id, owner_id),
+                    )
+                else:
+                    cur.execute(
+                        f"UPDATE sow_documents SET {set_clause} WHERE id=%s",
+                        (*values, doc_id),
+                    )
+                conn.commit()
+                if cur.rowcount == 0:
+                    return None
+                return self.get(doc_id)
+            finally:
+                cur.close()
+                conn.close()
+        else:
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                set_clause = ", ".join([f"{k}=?" for k in fields])
+                values = list(fields.values())
+                if owner_id is not None:
+                    cur.execute(
+                        f"UPDATE sow_documents SET {set_clause} WHERE id=? AND user_id=?",
+                        (*values, doc_id, owner_id),
+                    )
+                else:
+                    cur.execute(
+                        f"UPDATE sow_documents SET {set_clause} WHERE id=?",
+                        (*values, doc_id),
+                    )
+                conn.commit()
+                if cur.rowcount == 0:
+                    return None
+                return self.get(doc_id)
+            finally:
+                conn.close()
+
+    def delete(self, doc_id: int, owner_id: int | None) -> bool:
+        if self.is_postgres:
+            conn = self._pg_conn()
+            try:
+                cur = conn.cursor()
+                if owner_id is not None:
+                    cur.execute(
+                        "DELETE FROM sow_documents WHERE id=%s AND user_id=%s",
+                        (doc_id, owner_id),
+                    )
+                else:
+                    cur.execute("DELETE FROM sow_documents WHERE id=%s", (doc_id,))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                cur.close()
+                conn.close()
+        else:
+            conn = self._connect()
+            try:
+                cur = conn.cursor()
+                if owner_id is not None:
+                    cur.execute(
+                        "DELETE FROM sow_documents WHERE id=? AND user_id=?",
+                        (doc_id, owner_id),
+                    )
+                else:
+                    cur.execute("DELETE FROM sow_documents WHERE id=?", (doc_id,))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
+
+# ---------------------------------------------------------------------------
+# SowService - high-level ops used by routes
+# ---------------------------------------------------------------------------
+
+class SowService:
+    """High-level SOW document operations with auth checks."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.store = SowStore(settings.auth_db_path, settings.database_url)
+
+    @staticmethod
+    def to_list_item(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "is_published": bool(row["is_published"]),
+            "sow_id": row.get("sow_id"),
+        }
+
+    @staticmethod
+    def to_detail(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "sow_id": row.get("sow_id"),
+            "title": row["title"],
+            "content_md": row["content_md"],
+            "content_plain": row["content_plain"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "is_published": bool(row["is_published"]),
+        }
+
+
+    def save_from_sow(
+        self,
+        user_id: int,
+        sow_dict: dict[str, Any],
+        sow_id: int | None = None,
+    ) -> dict[str, Any]:
+        sow = SowResponse.model_validate(sow_dict)
+        content_md = _sow_to_markdown(sow)
+        content_plain = _sow_to_plaintext(sow)
+        title = str(sow.project_title or "Untitled Scope of Work")
+        row = self.store.create(
+            user_id=user_id,
+            title=title,
+            content_md=content_md,
+            content_plain=content_plain,
+            sow_id=sow_id,
+            is_published=False,
+        )
+        return row
+
+    def assert_owner(self, doc_id: int, user: dict[str, Any]) -> dict[str, Any]:
+        from fastapi import HTTPException, status
+        row = self.store.get(doc_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+        if user["role"] != "superadmin" and row["user_id"] != user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this document.")
+        return row
+
+    def export_to_gdoc(
+        self, doc_id: int, owner_email: str | None, settings: Settings
+    ) -> tuple[str, str]:
+        from fastapi import HTTPException, status
+        from app.services.gdoc_service import GdocNotConfiguredError
+        row = self.store.get(doc_id)
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+        try:
+            sow_dict = json.loads(row["content_plain"])
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise RuntimeError(f"Stored document is corrupted: {exc}") from exc
+
+        input_fd, input_path = tempfile.mkstemp(suffix=".json", prefix="osiris_sow_")
+        output_fd, output_path = tempfile.mkstemp(suffix=".json", prefix="osiris_gdoc_")
+        os.close(input_fd)
+        os.close(output_fd)
+
+        try:
+            Path(input_path).write_text(
+                json.dumps({"sow": sow_dict, "owner_email": owner_email}),
+                encoding="utf-8",
+            )
+            venv_python = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
+            if not venv_python.exists():
+                venv_python = Path(sys.executable)
+
+            proc = subprocess.run(
+                [str(venv_python), "-m", "app.services.gdoc_export_cli", input_path, output_path],
+                cwd=str(BACKEND_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=150,
+            )
+            out_file = Path(output_path)
+            if out_file.exists():
+                result = json.loads(out_file.read_text(encoding="utf-8"))
+            else:
+                result = {"ok": False, "error": f"export subprocess exited {proc.returncode}"}
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Google Docs export timed out after 150s.") from exc
+        finally:
+            for p in (input_path, output_path):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+        if not result.get("ok"):
+            if result.get("status") == 503:
+                raise GdocNotConfiguredError(result.get("error") or "Google Docs export is not configured.")
+            raise RuntimeError(result.get("error") or "Unknown export error")
+
+        return str(result["doc_url"]), str(result["doc_id"])
+
+
+# ---------------------------------------------------------------------------
+# Markdown / plaintext helpers
+# ---------------------------------------------------------------------------
+
+def _sow_to_markdown(sow: SowResponse) -> str:
+    """Convert a SowResponse into a Markdown string for storage."""
+    lines: list[str] = []
+    lines.append(f"# {sow.project_title}")
+    if sow.site or sow.client:
+        meta: list[str] = []
+        if sow.site:
+            meta.append(f"**Site:** {sow.site}")
+        if sow.client:
+            meta.append(f"**Client:** {sow.client}")
+        lines.append("  " + "\u00b7".join(meta))
+    if sow.generated_at:
+        lines.append(f"**Generated:** {sow.generated_at}")
+    lines.append("")
+
+    es = sow.executive_summary
+    if es:
+        lines.append("## Executive Summary")
+        if es.overview:
+            lines.append(f"\n{es.overview}\n")
+        if es.overall_condition:
+            lines.append(f"**Overall Condition:** {es.overall_condition}\n")
+
+    if sow.visual_findings:
+        lines.append("## Visual Findings")
+        for vf in sow.visual_findings:
+            lines.append(f"### {vf.location}")
+            if vf.observation:
+                lines.append(f"**Observation:** {vf.observation}")
+            if vf.severity:
+                lines.append(f"**Severity:** {vf.severity}")
+            if vf.recommendation:
+                lines.append(f"**Recommendation:** {vf.recommendation}")
+            lines.append("")
+
+    if sow.recommended_services:
+        lines.append("## Recommended Services")
+        for svc in sow.recommended_services:
+            cat = svc.category if getattr(svc, "category", None) else "General"
+            lines.append(
+                f"- **{svc.service_name}** ({cat}) - "
+                f"{sow.cost_breakdown.currency} {svc.total_cost:,.2f}"
+            )
+            if svc.description:
+                lines.append(f"  {svc.description}")
+        lines.append("")
+
+    if sow.scope_breakdown:
+        lines.append("## Scope of Work")
+        for scope in sow.scope_breakdown:
+            heading = scope.phase or scope.title or "Phase"
+            lines.append(f"### {heading}")
+            if scope.description:
+                lines.append(f"\n{scope.description}\n")
+        lines.append("")
+
+    cb = sow.cost_breakdown
+    lines.append("## Cost Breakdown")
+    lines.append("| Item | Amount |")
+    lines.append("|-------|--------|")
+    lines.append(f"| Labor | {cb.currency} {cb.labor:,.2f} |")
+    lines.append(f"| Materials | {cb.currency} {cb.materials:,.2f} |")
+    lines.append(f"| Equipment | {cb.currency} {cb.equipment:,.2f} |")
+    lines.append(f"| **Subtotal** | **{cb.currency} {cb.subtotal:,.2f}** |")
+    if cb.contingency_pct:
+        lines.append(f"| Contingency ({cb.contingency_pct}%) | {cb.currency} {cb.contingency:,.2f} |")
+    lines.append(f"| **Total** | **{cb.currency} {cb.total:,.2f}** |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _sow_to_plaintext(sow: SowResponse) -> str:
+    """Serialize SowResponse as JSON for use by the Google Docs exporter."""
+    return sow.model_dump_json(indent=2)
+

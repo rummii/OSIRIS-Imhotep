@@ -62,3 +62,55 @@ class ResetPasswordRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     detail: str
+
+
+# ---------------------------------------------------------------------------
+# Local storage models for SOW documents
+# ---------------------------------------------------------------------------
+
+class SowDocument(BaseModel):
+    """A SOW document stored locally on the backend (Markdown + plain text).
+
+    Used when Google Docs export is optional -- the document is saved to the
+    backend database and can be rendered in the frontend or exported to a
+    Google Doc on-demand via POST /api/sow/{id}/export-gdoc.
+    """
+    id: int
+    user_id: int
+    sow_id: Optional[int] = None
+    title: str
+    content_md: str
+    content_plain: str
+    created_at: str
+    updated_at: str
+    is_published: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class SowDocumentCreate(BaseModel):
+    """Payload for creating a new SowDocument via the API."""
+    sow_id: Optional[int] = None
+    title: str
+    content_md: str
+    content_plain: str
+    is_published: bool = False
+
+
+class SowDocumentUpdate(BaseModel):
+    """Payload for updating an existing SowDocument."""
+    title: Optional[str] = None
+    content_md: Optional[str] = None
+    content_plain: Optional[str] = None
+    is_published: Optional[bool] = None
+
+
+class SowDocumentListItem(BaseModel):
+    """Minimal item for listing user documents."""
+    id: int
+    title: str
+    created_at: str
+    updated_at: str
+    is_published: bool
+    sow_id: Optional[int] = None

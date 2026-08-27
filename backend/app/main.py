@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin_routes import router as admin_router
 from app.api.auth_routes import router as auth_router
 from app.api.routes import router
+from app.api.sow_routes import router as sow_router
 from app.config import get_settings
 from app.services.auth_service import AuthService
 from app.services.media_processor import ensure_temp_dir
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(admin_router, prefix="/api")
+    app.include_router(sow_router, prefix="/api")
     return app
 
 

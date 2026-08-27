@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from typing import Optional
 
 from app.config import get_settings
 from app.core.dependencies import get_current_user
@@ -28,6 +29,7 @@ from app.services.gemini_vision_service import GeminiVisionError, GeminiVisionSe
 from app.services.media_processor import MediaBundle, process_uploads
 from app.services.prompt_builder import PromptBuilder
 from app.services.rag_provider import get_context_provider
+from app.services.sow_service import SowService
 
 logger = logging.getLogger("osiris.routes")
 router = APIRouter()
@@ -53,7 +55,7 @@ def generate_sow(
     site: str = Form(""),
     client: str = Form(""),
     files: list[UploadFile] = File(default=[]),
-    _current_user: dict = Depends(get_current_user),  # login gate
+    current_user: dict = Depends(get_current_user),  # login gate + document owner
 ) -> GenerateResponse:
     """Accept engineer notes + media (images / short clips) and produce a SOW."""
     settings = get_settings()
@@ -118,6 +120,20 @@ def generate_sow(
         logger.exception("Model output failed validation.")
         raise HTTPException(status_code=502, detail=f"Model output failed validation: {exc}") from exc
 
+    # 6. Persist the generated SOW as a document for the current user ---------
+    document_id: Optional[int] = None
+    try:
+        sow_dict = sow.model_dump(mode="json")
+        saved = SowService(settings).save_from_sow(
+            user_id=current_user["id"],
+            sow_dict=sow_dict,
+        )
+        document_id = int(saved.get("id")) if saved else None
+        logger.info("Saved SOW document %s for user %s", document_id, current_user.get("username"))
+    except Exception:
+        # Persistence is best-effort: a failed save must not break generation.
+        logger.exception("Failed to save SOW document for user %s", current_user.get("username"))
+
     return GenerateResponse(
         sow=sow,
         media_log=[MediaLogEntry.model_validate(entry) for entry in media.log],
@@ -126,6 +142,7 @@ def generate_sow(
         grounding_sources=[],
         context_provider=context_provider.name,
         generated_at=datetime.now(timezone.utc).isoformat(),
+        document_id=document_id,
     )
 
 

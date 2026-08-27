@@ -159,3 +159,108 @@ export async function exportToGoogleDoc(
   return res.json();
 }
 
+
+// ---------------------------------------------------------------------------
+// SOW document persistence (local storage + on-demand Google Docs export)
+// ---------------------------------------------------------------------------
+
+export interface SowDocumentListItem {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  is_published: boolean;
+  sow_id?: number | null;
+}
+
+export interface SowDocumentDetail {
+  id: number;
+  user_id: number;
+  sow_id?: number | null;
+  title: string;
+  content_md: string;
+  content_plain: string;
+  created_at: string;
+  updated_at: string;
+  is_published: boolean;
+}
+
+/** GET /api/sow?scope=mine — list the current user's saved SOW documents. */
+export async function listSowDocuments(
+  scope: "mine" | "all" = "mine"
+): Promise<SowDocumentListItem[]> {
+  const res = await fetch(`/api/sow?scope=${scope}`, { headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = await res.json();
+  return data.documents as SowDocumentListItem[];
+}
+
+/** GET /api/sow/:id — fetch a single saved SOW document (owner or superadmin). */
+export async function getSowDocument(id: number): Promise<SowDocumentDetail> {
+  const res = await fetch(`/api/sow/${id}`, { headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+/** POST /api/sow — create a new saved SOW document. */
+export async function createSowDocument(data: {
+  title: string;
+  content_md: string;
+  content_plain: string;
+  sow_id?: number | null;
+  is_published?: boolean;
+}): Promise<SowDocumentDetail> {
+  const res = await fetch("/api/sow", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+/** PATCH /api/sow/:id — update title / content / published flag. */
+export async function updateSowDocument(
+  id: number,
+  data: {
+    title?: string;
+    content_md?: string;
+    content_plain?: string;
+    is_published?: boolean;
+  }
+): Promise<SowDocumentDetail> {
+  const res = await fetch(`/api/sow/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+/** DELETE /api/sow/:id — permanently remove a saved document. */
+export async function deleteSowDocument(id: number): Promise<void> {
+  const res = await fetch(`/api/sow/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+/** POST /api/sow/:id/export-gdoc — on-demand Google Docs export of a saved doc. */
+export async function exportSowToGdoc(id: number): Promise<{ doc_url: string; doc_id: string }> {
+  const res = await fetch(`/api/sow/${id}/export-gdoc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({}),
+  });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+

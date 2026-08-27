@@ -193,6 +193,7 @@ class GenerateResponse(BaseModel):
     grounding_sources: list[GroundingSource] = Field(default_factory=list)
     context_provider: str = "null"
     generated_at: str = ""
+    document_id: Optional[int] = None
 
 
 class ExportRequest(BaseModel):
