@@ -157,6 +157,33 @@ gcloud iam service-accounts keys create credentials/osiris-sa.json \
   `GOOGLE_DOCS_IMPERSONATE=<user@yourdomain.com>`; otherwise each export shares the doc
   with the engineer's `owner_email` (already supported by the API).
 
+> **⚠️ Service accounts canNOT create Google Docs (verified 2026-08).** The Google Docs API
+> rejects `docs.create` with `403 PERMISSION_DENIED` for service accounts in standalone
+> (non-Workspace) projects — the SA must belong to a Google Workspace domain. If your project
+> `spsasean` is not backed by Workspace, the export endpoint will fail with a clear message.
+>
+> **Working alternative: user OAuth token.** Run the helper to mint a token for the account
+> that should own exported docs, then store it in Secret Manager and point the service at it:
+>
+> ```bash
+> cd backend && .venv\Scripts\python.exe ..\deploy\setup_oauth_token.py
+> gcloud secrets create gdoc-oauth-token --data-file=backend/credentials/google-oauth-token.json
+> gcloud secrets add-iam-policy-binding gdoc-oauth-token \
+>   --member=serviceAccount:890958491914-compute@developer.gserviceaccount.com \
+>   --role=roles/secretmanager.secretAccessor
+> gcloud run services update osiris-imhotep --region=europe-west1 \
+>   --update-secrets=GOOGLE_OAUTH_TOKEN_JSON=gdoc-oauth-token:latest \
+>   --update-env-vars=GOOGLE_OAUTH_TOKEN_FILE=/tmp/app-data/oauth-token.json
+> ```
+> (`main.py` materialises `GOOGLE_OAUTH_TOKEN_JSON` → `GOOGLE_OAUTH_TOKEN_FILE` at startup.)
+
+> **⚠️ Cloud Run storage is ephemeral.** `AUTH_DB_PATH=/tmp/users.db` lives in the instance's
+> in-memory `/tmp`, so users, logins and saved SOW documents are reset whenever the service
+> scales to zero or recycles an instance. The exported Google Docs are the durable output.
+> For durable storage, point `DATABASE_URL` at Cloud SQL (the backend already supports
+> `postgres+pg8000://`; `SowStore` auto-uses Postgres when `DATABASE_URL` is set) and attach
+> the connection string as a Secret Manager secret.
+
 ## 3. Static IP + DNS
 
 ```bash
