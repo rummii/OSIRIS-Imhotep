@@ -264,3 +264,19 @@ export async function exportSowToGdoc(id: number): Promise<{ doc_url: string; do
   return res.json();
 }
 
+/** GET /api/sow/:id/download-docx — download the SOW as a .docx file. */
+export async function downloadSowDocx(doc: SowDocumentListItem): Promise<void> {
+  const res = await fetch(`/api/sow/${doc.id}/download-docx`, { headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${doc.title.replace(/[\\/:*?"<>|]/g, "-") || "SOW"}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+

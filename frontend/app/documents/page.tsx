@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, FileText, Trash2, ExternalLink, Plus } from "lucide-react";
+import { ArrowLeft, Download, FileText, Trash2, ExternalLink, Plus } from "lucide-react";
 import {
   listSowDocuments,
   deleteSowDocument,
   exportSowToGdoc,
+  downloadSowDocx,
   type SowDocumentListItem,
 } from "@/lib/api";
 import { clearAuth, getCachedUser, isAuthenticated } from "@/lib/auth";
@@ -149,12 +150,20 @@ export default function DocumentsPage() {
                 <div className="mt-4 flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={() => void downloadSowDocx(doc)}
+                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Download size={13} />
+                    Download .docx
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleExport(doc)}
                     disabled={exportingId === doc.id}
                     className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
                   >
                     <ExternalLink size={13} />
-                    {exportingId === doc.id ? "Exporting…" : "Export to Google Docs"}
+                    {exportingId === doc.id ? "Exporting…" : "Google Docs"}
                   </button>
                   <button
                     type="button"

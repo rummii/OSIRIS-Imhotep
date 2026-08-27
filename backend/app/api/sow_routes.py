@@ -149,6 +149,31 @@ def get_markdown(doc_id: int, user: dict = Depends(get_current_user)) -> Respons
     return Response(content=row["content_md"], media_type="text/markdown; charset=utf-8")
 
 
+@router.get("/{doc_id}/download-docx")
+def download_docx(doc_id: int, user: dict = Depends(get_current_user)) -> Response:
+    """Download the SOW as a .docx file (works with no Google account).
+
+    Google Docs export requires a Google identity with Drive quota; a service
+    account in a standalone project cannot create Docs. This endpoint always
+    works: the file can be opened in Word/LibreOffice or uploaded to a
+    personal Google Drive to get a native Google Doc.
+    """
+    from urllib.parse import quote
+    from app.services.sow_service import export_to_docx
+    service = _service()
+    row = service.assert_owner(doc_id, user)
+    filename = quote((row["title"] or "SOW").replace("/", "-")) + ".docx"
+    content = export_to_docx(row["content_md"], row["title"] or "Scope of Work")
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}'},
+    )
+
+
 @router.post("/{doc_id}/export-gdoc", response_model=ExportGdocResponse)
 def export_to_gdoc(
     doc_id: int,
