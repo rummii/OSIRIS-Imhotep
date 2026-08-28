@@ -53,6 +53,8 @@ interface SowReportProps {
   model: string;
   grounding: boolean;
   groundingSources: { title: string; url: string }[];
+  /** Server-assigned doc id (optional — shown once the SOW has been saved). */
+  docId?: number | null;
 }
 
 export default function SowReport({
@@ -78,7 +80,7 @@ export default function SowReport({
             </p>
           </div>
           <div className="w-full sm:w-72">
-            <ExportButton sow={sow} />
+            <ExportButton docId={docId ?? 0} />
           </div>
         </div>
       </div>

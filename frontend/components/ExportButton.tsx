@@ -6,7 +6,8 @@ import { exportToGoogleDoc } from "@/lib/api";
 import type { SowResponse } from "@/lib/types";
 
 interface ExportButtonProps {
-  sow: SowResponse;
+  /** The server-assigned doc id (from POST /api/sow/from-generation). */
+  docId: number;
 }
 
 type ExportState =
@@ -19,14 +20,14 @@ type ExportState =
  * "Generate Google Doc" button — POSTs the SOW payload to
  * /api/sow/export-gdoc and surfaces the live doc URL.
  */
-export default function ExportButton({ sow }: ExportButtonProps) {
+export default function ExportButton({ docId }: ExportButtonProps) {
   const [state, setState] = useState<ExportState>({ status: "idle" });
   const [email, setEmail] = useState("");
 
   const handleExport = async () => {
     setState({ status: "loading" });
     try {
-      const result = await exportToGoogleDoc(sow, email.trim() || undefined);
+      const result = await exportToGoogleDoc(docId, email.trim() || undefined);
       setState({ status: "done", url: result.doc_url });
     } catch (err) {
       setState({ status: "error", message: err instanceof Error ? err.message : "Export failed" });

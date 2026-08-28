@@ -7,7 +7,7 @@ import { AlertTriangle, FileText, HardHat, LogOut, ShieldCheck, Sparkles, UserRo
 import ChatInput, { type ChatSubmission } from "@/components/ChatInput";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import SowReport from "@/components/SowReport";
-import { generateSow } from "@/lib/api";
+import { generateSow, saveFromGeneration } from "@/lib/api";
 import type { GenerateResponse } from "@/lib/types";
 import { clearAuth, getCachedUser, isAuthenticated, type SessionUser } from "@/lib/auth";
 
@@ -19,7 +19,7 @@ type Message =
       client: string;
       media: { name: string; kind: string }[];
     }
-  | { role: "assistant"; result: GenerateResponse }
+  | { role: "assistant"; result: GenerateResponse; docId: number | null }
   | { role: "error"; message: string };
 
 export default function Home() {
@@ -62,7 +62,15 @@ export default function Home() {
 
     try {
       const result = await generateSow(submission);
-      setMessages((prev) => [...prev, { role: "assistant", result }]);
+      // Auto-save so the SOW appears in the Documents list and can be re-exported.
+      let docId: number | null = null;
+      try {
+        const saved = await saveFromGeneration(result.sow);
+        docId = saved.id;
+      } catch (saveErr) {
+        console.warn("Auto-save failed:", saveErr);
+      }
+      setMessages((prev) => [...prev, { role: "assistant", result, docId }]);
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -155,6 +163,7 @@ export default function Home() {
                   model={message.result.model}
                   grounding={message.result.grounding}
                   groundingSources={message.result.grounding_sources}
+                  docId={message.docId}
                 />
               )}
             </div>

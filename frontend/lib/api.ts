@@ -142,17 +142,37 @@ export async function generateSow(params: GenerateParams): Promise<GenerateRespo
 }
 
 /**
- * POST /api/sow/export-gdoc — converts the SOW JSON into a Google Doc and
- * returns the live doc URL.
+ * POST /api/sow/from-generation — persist a generated SOW so it appears in
+ * the Documents list and can be re-exported. Returns the saved doc detail
+ * including the server-assigned id.
  */
-export async function exportToGoogleDoc(
-  sow: SowResponse,
-  ownerEmail?: string
-): Promise<ExportResponse> {
-  const res = await fetch("/api/sow/export-gdoc", {
+export async function saveFromGeneration(
+  sow: GenerateResponse["sow"],
+  sowId?: number | null,
+  isPublished = false,
+): Promise<SowDocumentDetail> {
+  const res = await fetch("/api/sow/from-generation", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ sow, owner_email: ownerEmail || null }),
+    body: JSON.stringify({ sow, sow_id: sowId, is_published: isPublished }),
+  });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+/**
+ * POST /api/sow/{docId}/export-gdoc — re-export a previously saved document
+ * to Google Docs using the server-assigned doc id.
+ */
+export async function exportToGoogleDoc(
+  docId: number,
+  ownerEmail?: string
+): Promise<ExportResponse> {
+  const res = await fetch(`/api/sow/${docId}/export-gdoc`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ owner_email: ownerEmail || null }),
   });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));

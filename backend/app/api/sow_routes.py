@@ -52,6 +52,19 @@ class SowDocumentCreate(BaseModel):
     is_published: bool = False
 
 
+class SowSaveFromGenerationRequest(BaseModel):
+    """Accepts a full SowResponse payload from /api/sow/generate and persists it.
+
+    Used by the frontend to auto-save a generated SOW so it appears in the
+    Documents list and can be re-exported later. The backend converts the
+    structured SOW into the same Markdown + plaintext representation used
+    elsewhere, so the result is fully round-trippable.
+    """
+    sow: dict
+    sow_id: Optional[int] = None
+    is_published: bool = False
+
+
 class SowDocumentUpdate(BaseModel):
     title: Optional[str] = None
     content_md: Optional[str] = None
@@ -139,6 +152,28 @@ def delete_document(doc_id: int, user: dict = Depends(get_current_user)) -> Mess
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
     return MessageResponse(detail=f"Document {doc_id} deleted.")
+
+
+@router.post("/from-generation", response_model=SowDocumentDetail, status_code=status.HTTP_201_CREATED)
+def save_from_generation(
+    payload: SowSaveFromGenerationRequest,
+    user: dict = Depends(get_current_user),
+) -> SowDocumentDetail:
+    """Auto-save a generated SOW so it appears in the Documents list.
+
+    The frontend calls /api/sow/generate to produce a structured SOW, then
+    POSTs it here so the user can re-open it later and re-export to
+    .docx / Google Docs. We do the Markdown + plaintext conversion on the
+    server so the on-disk representation is consistent with manually-saved
+    documents.
+    """
+    service = _service()
+    row = service.save_from_sow(
+        user_id=user["id"],
+        sow_dict=payload.sow,
+        sow_id=payload.sow_id,
+    )
+    return SowDocumentDetail(**SowService.to_detail(row))
 
 
 @router.get("/{doc_id}/markdown")
