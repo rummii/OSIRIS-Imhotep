@@ -68,11 +68,6 @@ class SowDocumentUpdate(BaseModel):
 class SowDocumentListResponse(BaseModel):
     documents: list[SowDocumentListItem]
 
-    owner_email: Optional[str] = None
-
-    doc_url: str
-    doc_id: str
-
 # -- routes -------------------------------------------------------------------
 
 @router.get("", response_model=SowDocumentListResponse)
