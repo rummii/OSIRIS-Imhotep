@@ -168,11 +168,16 @@ def save_from_generation(
     documents.
     """
     service = _service()
-    row = service.save_from_sow(
+    logger.info("save_from_generation: user_id=%s sow_keys=%s", user.get("id"), list(payload.sow.keys()))
+    try:
+        row = service.save_from_sow(
         user_id=user["id"],
         sow_dict=payload.sow,
         sow_id=payload.sow_id,
     )
+    except Exception as exc:
+        logger.exception("save_from_generation failed: %s", exc)
+        raise
     return SowDocumentDetail(**SowService.to_detail(row))
 
 
