@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, FileText, HardHat, LogOut, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { AlertTriangle, FileText, LogOut, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import ChatInput, { type ChatSubmission } from "@/components/ChatInput";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import SowReport from "@/components/SowReport";
@@ -100,7 +100,19 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="grid h-9 w-9 place-items-center rounded-md bg-slate-900">
-            <HardHat size={18} className="text-white" />
+            <svg viewBox="0 0 32 32" className="h-5 w-5" aria-hidden="true">
+              <text
+                x="16"
+                y="22"
+                fontFamily="Arial, sans-serif"
+                fontSize="18"
+                fontWeight="bold"
+                fill="#f59e0b"
+                textAnchor="middle"
+              >
+                O
+              </text>
+            </svg>
           </div>
           <div>
             <h1 className="text-sm font-bold text-slate-950">

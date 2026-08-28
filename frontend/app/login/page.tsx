@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { HardHat, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { login } from "@/lib/api";
 import { clearAuth, setCachedUser, setToken } from "@/lib/auth";
 
@@ -44,7 +44,19 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-lg bg-slate-900">
-            <HardHat size={24} className="text-white" />
+            <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true">
+              <text
+                x="16"
+                y="22"
+                fontFamily="Arial, sans-serif"
+                fontSize="18"
+                fontWeight="bold"
+                fill="#f59e0b"
+                textAnchor="middle"
+              >
+                O
+              </text>
+            </svg>
           </div>
           <h1 className="text-xl font-semibold text-slate-950">
             OSIRIS <span className="text-blue-700">Imhotep</span>

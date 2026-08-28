@@ -65,7 +65,19 @@ export default function DocumentsPage() {
         <div className="mx-auto flex max-w-5xl items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-md bg-slate-900">
-              <FileText size={17} className="text-white" />
+              <svg viewBox="0 0 32 32" className="h-5 w-5" aria-hidden="true">
+                <text
+                  x="16"
+                  y="22"
+                  fontFamily="Arial, sans-serif"
+                  fontSize="18"
+                  fontWeight="bold"
+                  fill="#f59e0b"
+                  textAnchor="middle"
+                >
+                  O
+                </text>
+              </svg>
             </div>
             <div>
               <h1 className="text-sm font-bold text-slate-950">My Documents</h1>
