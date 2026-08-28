@@ -470,8 +470,9 @@ def _sow_to_markdown(sow: SowResponse) -> str:
                 f"- **{svc.service}** (Asset: {asset}, Priority: {svc.priority}) - "
                 f"{sow.cost_breakdown.currency} {svc.total_cost:,.2f}"
             )
-            if svc.notes:
-                lines.append(f"  {svc.notes}")
+            notes = getattr(svc, "notes", None) or getattr(svc, "description", None)
+            if notes:
+                lines.append(f"  {notes}")
         lines.append("")
 
     if sow.scope_breakdown:
