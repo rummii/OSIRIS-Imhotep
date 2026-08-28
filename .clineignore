@@ -1,0 +1,28 @@
+# OSIRIS Imhotep — Cline context guard
+# Prevent the agent from reading massive cache directories
+
+# Dependencies (should be regenerated via npm install / pip install)
+node_modules/
+.next/
+backend/__pycache__/
+frontend/.next/
+backend/.venv/
+venv/
+env/
+
+# Runtime artifacts
+*.log
+*.txt
+*.ps1
+*.cmd
+
+# Build outputs
+dist/
+build/
+out/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

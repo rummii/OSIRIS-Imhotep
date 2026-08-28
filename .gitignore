@@ -34,3 +34,29 @@ backend/data/
 
 # Debug / scratch output
 _*.txt
+
+# Ignore cloud configs (keep .github/ for CI/CD workflows)
+.git/
+.gcloud/
+.google/
+
+# Ignore massive dependencies
+node_modules/
+venv/
+.venv/
+env/
+__pycache__/
+
+# Ignore build outputs and logs
+dist/
+build/
+out/
+*.log
+tmp/
+
+# Ignore media and data files
+*.png
+*.jpg
+*.mp4
+*.csv
+*.json
