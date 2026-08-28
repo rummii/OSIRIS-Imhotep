@@ -526,14 +526,14 @@ def _sow_to_markdown(sow: SowResponse) -> str:
                 f"- **{svc.service}** (Asset: {asset}, Priority: {svc.priority}) - "
                 f"{sow.cost_breakdown.currency} {svc.total_cost:,.2f}"
             )
-            if svc.description:
-                lines.append(f"  {svc.description}")
+            if svc.notes:
+                lines.append(f"  {svc.notes}")
         lines.append("")
 
     if sow.scope_breakdown:
         lines.append("## Scope of Work")
         for scope in sow.scope_breakdown:
-            heading = scope.phase or scope.title or "Phase"
+            heading = scope.phase or "Phase"
             lines.append(f"### {heading}")
             if scope.work_description:
                 lines.append(f"\n{scope.work_description}\n")
