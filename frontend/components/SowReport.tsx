@@ -53,8 +53,8 @@ interface SowReportProps {
   model: string;
   grounding: boolean;
   groundingSources: { title: string; url: string }[];
-  /** Server-assigned doc id (optional — shown once the SOW has been saved). */
-  docId?: number | null;
+  /** Server-assigned doc id (undefined while auto-save is in flight). */
+  docId?: number;
 }
 
 export default function SowReport({
@@ -62,6 +62,7 @@ export default function SowReport({
   model,
   grounding,
   groundingSources,
+  docId,
 }: SowReportProps) {
   const currency = sow.currency || "PHP";
 
@@ -80,7 +81,7 @@ export default function SowReport({
             </p>
           </div>
           <div className="w-full sm:w-72">
-            <ExportButton docId={docId ?? 0} />
+            <ExportButton docId={docId} />
           </div>
         </div>
       </div>

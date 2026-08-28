@@ -6,8 +6,9 @@ import { exportToGoogleDoc } from "@/lib/api";
 import type { SowResponse } from "@/lib/types";
 
 interface ExportButtonProps {
-  /** The server-assigned doc id (from POST /api/sow/from-generation). */
-  docId: number;
+  /** The server-assigned doc id (from POST /api/sow/from-generation).
+   *  Undefined while the auto-save is still in flight. */
+  docId?: number;
 }
 
 type ExportState =
@@ -25,6 +26,7 @@ export default function ExportButton({ docId }: ExportButtonProps) {
   const [email, setEmail] = useState("");
 
   const handleExport = async () => {
+    if (!docId) return;
     setState({ status: "loading" });
     try {
       const result = await exportToGoogleDoc(docId, email.trim() || undefined);
@@ -33,6 +35,14 @@ export default function ExportButton({ docId }: ExportButtonProps) {
       setState({ status: "error", message: err instanceof Error ? err.message : "Export failed" });
     }
   };
+
+  if (!docId) {
+    return (
+      <div className="rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-500">
+        Saving to Documents…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
