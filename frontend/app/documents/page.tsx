@@ -16,38 +16,48 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<SowDocumentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [user, setUser] = useState<ReturnType<typeof getCachedUser>>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setDocs(await listSowDocuments("mine"));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load documents");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const isSuperadmin = user?.role === "superadmin";
+
+  const load = useCallback(
+    async (requestedScope: "mine" | "all") => {
+      setLoading(true);
+      setError("");
+      try {
+        setDocs(await listSowDocuments(requestedScope));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load documents");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!isAuthenticated()) {
       router.replace("/login");
       return;
     }
-    void load();
-  }, [load, router]);
+    setUser(getCachedUser());
+  }, [router]);
+
+  useEffect(() => {
+    if (!user) return;
+    void load(scope);
+  }, [load, scope, user]);
 
   const handleDelete = async (doc: SowDocumentListItem) => {
     if (!window.confirm(`Delete "${doc.title}"? This cannot be undone.`)) return;
     try {
       await deleteSowDocument(doc.id);
-      await load();
+      void load(scope);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed");
     }
   };
-
-  const user = getCachedUser();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -60,11 +70,41 @@ export default function DocumentsPage() {
             <div>
               <h1 className="text-sm font-bold text-slate-950">My Documents</h1>
               <p className="text-[11px] text-slate-500">
-                {user?.role === "superadmin" ? "All saved SOWs" : "Your saved Scope of Work documents"}
+                {isSuperadmin
+                  ? scope === "all"
+                    ? "All saved SOWs (every user)"
+                    : "Your saved SOWs"
+                  : "Your saved Scope of Work documents"}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {isSuperadmin && (
+              <div className="flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setScope("mine")}
+                  className={`rounded px-2 py-1 transition ${
+                    scope === "mine"
+                      ? "bg-white font-semibold text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Mine
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope("all")}
+                  className={`rounded px-2 py-1 transition ${
+                    scope === "all"
+                      ? "bg-white font-semibold text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => router.push("/")}
