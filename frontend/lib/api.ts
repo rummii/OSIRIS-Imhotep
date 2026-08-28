@@ -8,10 +8,10 @@ async function parseError(res: Response): Promise<string> {
     detail = body.detail ?? detail;
   } catch {
     // Non-JSON error body — e.g. Next.js returns an HTML 500 page when the
-    // backend is unreachable, or the browser/network hiccuped.
+    // service is unreachable, or the browser/network hiccuped.
     if (res.status === 500) {
       detail =
-        "The backend did not respond. Make sure it is running (dev-backend.cmd), then try again.";
+        "The service did not respond. Please try again in a moment.";
     }
   }
   return detail;

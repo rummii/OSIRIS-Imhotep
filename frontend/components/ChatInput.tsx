@@ -160,7 +160,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
         {/* Optional engagement context (site / client) */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1 text-xs text-slate-500">
-            <Paperclip size={13} /> Photos and video are analyzed by Gemini Vision.
+            <Paperclip size={13} /> Photos and video are analyzed for visual evidence.
           </span>
           <button
             type="button"

@@ -1,4 +1,4 @@
-// TypeScript mirror of backend/app/models/schemas.py
+// Type definitions mirrored from the SOW API
 
 export interface ExecutiveSummary {
   overview: string;

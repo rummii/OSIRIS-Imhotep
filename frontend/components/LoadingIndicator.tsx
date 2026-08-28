@@ -17,9 +17,9 @@ interface LoadingIndicatorProps {
 }
 
 /**
- * Staged loading state shown while the backend runs text analysis.
- * The backend call is a single POST; we animate through realistic pipeline
- * stages so the user can see what is happening under the hood.
+ * Staged loading state shown while the service generates a Scope of Work.
+ * The generation call is a single POST; we animate through realistic stages
+ * so the user can see what is happening while they wait.
  */
 export default function LoadingIndicator({ mediaCount }: LoadingIndicatorProps) {
   const [elapsed, setElapsed] = useState(0);
@@ -44,8 +44,8 @@ export default function LoadingIndicator({ mediaCount }: LoadingIndicatorProps) 
           <p className="text-sm font-medium text-slate-900">OSIRIS is preparing your scope…</p>
           <p className="text-xs text-slate-500">
             {mediaCount > 0
-              ? `${mediaCount} attachment${mediaCount > 1 ? "s" : ""} · Gemini Vision + DeepSeek`
-              : "Notes-only analysis · DeepSeek Chat"}
+              ? `${mediaCount} attachment${mediaCount > 1 ? "s" : ""} · visual + text analysis`
+              : "Notes-only analysis"}
           </p>
         </div>
       </div>
