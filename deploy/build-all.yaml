@@ -7,6 +7,7 @@ steps:
     id: "build-backend"
     args:
       - "build"
+      - "--no-cache"
       - "-t"
       - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
       - "-t"
