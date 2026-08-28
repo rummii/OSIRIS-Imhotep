@@ -491,20 +491,20 @@ def _sow_to_markdown(sow: SowResponse) -> str:
         lines.append("## Visual Findings")
         for vf in sow.visual_findings:
             lines.append(f"### {vf.location}")
-            if vf.observation:
-                lines.append(f"**Observation:** {vf.observation}")
+            if vf.description:
+                lines.append(f"**Description:** {vf.description}")
             if vf.severity:
                 lines.append(f"**Severity:** {vf.severity}")
-            if vf.recommendation:
-                lines.append(f"**Recommendation:** {vf.recommendation}")
+            if vf.recommended_action:
+                lines.append(f"**Recommended Action:** {vf.recommended_action}")
             lines.append("")
 
     if sow.recommended_services:
         lines.append("## Recommended Services")
         for svc in sow.recommended_services:
-            cat = svc.category if getattr(svc, "category", None) else "General"
+            asset = svc.asset if getattr(svc, "asset", None) else "General"
             lines.append(
-                f"- **{svc.service_name}** ({cat}) - "
+                f"- **{svc.service}** (Asset: {asset}, Priority: {svc.priority}) - "
                 f"{sow.cost_breakdown.currency} {svc.total_cost:,.2f}"
             )
             if svc.description:
@@ -516,8 +516,8 @@ def _sow_to_markdown(sow: SowResponse) -> str:
         for scope in sow.scope_breakdown:
             heading = scope.phase or scope.title or "Phase"
             lines.append(f"### {heading}")
-            if scope.description:
-                lines.append(f"\n{scope.description}\n")
+            if scope.work_description:
+                lines.append(f"\n{scope.work_description}\n")
         lines.append("")
 
     cb = sow.cost_breakdown
