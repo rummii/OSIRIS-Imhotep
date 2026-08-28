@@ -142,7 +142,7 @@ class ScopeItem(BaseModel):
     phase: str = ""
     work_description: str = ""
     deliverables: list[str] = Field(default_factory=list)
-    duration_days: int = 0
+    duration_days: int | None = 0
 
 class CostBreakdown(BaseModel):
     currency: str = "PHP"
@@ -243,7 +243,10 @@ def coerce_sow_payload(data: dict[str, Any]) -> SowResponse:
         "executive_summary": data.get("executive_summary") or {},
         "visual_findings": [f for f in data.get("visual_findings") or [] if isinstance(f, dict)],
         "recommended_services": services,
-        "scope_breakdown": [s for s in data.get("scope_breakdown") or [] if isinstance(s, dict)],
+        "scope_breakdown": [
+            {**s, "duration_days": _to_int(s.get("duration_days"))}
+            for s in (data.get("scope_breakdown") or []) if isinstance(s, dict)
+        ],
         "cost_breakdown": {
             "currency": currency,
             "labor": labor,
