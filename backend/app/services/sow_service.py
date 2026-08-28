@@ -52,6 +52,7 @@ class SowStore:
 
     def _pg_conn(self):
         import pg8000
+        from app.services.auth_service import _pg_ssl_context
         opts = self._pg
         return pg8000.connect(
             user=opts["user"],
@@ -60,7 +61,7 @@ class SowStore:
             host=opts["host"] or "localhost",
             port=opts["port"] or 5432,
             unix_sock=opts.get("unix_sock") or None,
-            ssl=opts["sslmode"] is not None,
+            ssl_context=_pg_ssl_context(opts),
         )
 
     def _init_sqlite_schema(self) -> None:

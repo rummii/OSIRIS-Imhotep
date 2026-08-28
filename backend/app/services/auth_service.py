@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import secrets
 import sqlite3
+import ssl
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -76,6 +77,35 @@ def _pg_row_to_dict(cur: Any, row: Any) -> dict[str, Any]:
     return dict(zip(columns, row))
 
 
+def _pg_ssl_context(pg: dict[str, Any]) -> Optional[ssl.SSLContext]:
+    """Build an ``ssl.SSLContext`` for pg8000 from parsed connection options.
+
+    pg8000 accepts ``ssl_context=<SSLContext>`` (not psycopg2-style dicts).
+    * No sslmode / unix socket  -> None (plain TCP, e.g. Cloud SQL socket)
+    * ``require`` (Neon/Supabase)-> TLS without cert validation
+    * ``verify-ca``/``verify-full`` -> CA + optional mTLS verification
+    """
+    sslmode = pg.get("sslmode")
+    if not sslmode or pg.get("unix_sock"):
+        return None
+
+    if sslmode in ("verify-ca", "verify-full"):
+        ctx = ssl.create_default_context(cafile=pg.get("sslrootcert"))
+        if sslmode == "verify-ca":
+            ctx.check_hostname = False
+        cert_path = pg.get("sslcert")
+        key_path = pg.get("sslkey")
+        if cert_path and key_path:
+            ctx.load_cert_chain(cert_path, key_path)
+        return ctx
+
+    # require / prefer / allow: encrypt but don't pin certificates
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 class UserStore:
     """Tiny user persistence with two interchangeable backends:
 
@@ -125,27 +155,10 @@ class UserStore:
             return conn
 
         # --- External Postgres (Neon / Supabase / etc.) via TCP ---------------
-        sslmode = self._pg.get("sslmode")
-        if sslmode:
-            ssl_ctx: dict[str, Any] = {"sslmode": sslmode}
-            # For verify-* modes we need to point to a CA bundle.
-            if sslmode in ("verify-ca", "verify-full"):
-                ca_path = self._pg.get("sslrootcert")
-                if ca_path:
-                    ssl_ctx["sslrootcert"] = ca_path
-            # Optional mTLS
-            cert_path = self._pg.get("sslcert")
-            key_path = self._pg.get("sslkey")
-            if cert_path and key_path:
-                ssl_ctx["sslcert"] = cert_path
-                ssl_ctx["sslkey"] = key_path
-            kwargs["ssl"] = ssl_ctx
-        else:
-            # Default to "require" if connecting to a TCP host (not unix socket)
-            if self._pg.get("host"):
-                kwargs["host"] = self._pg["host"]
-                kwargs["port"] = self._pg["port"] or 5432
-                kwargs["ssl"] = {"sslmode": "require"}
+        kwargs["ssl_context"] = _pg_ssl_context(self._pg)
+        if self._pg.get("host"):
+            kwargs["host"] = self._pg["host"]
+            kwargs["port"] = self._pg["port"] or 5432
 
         conn = pg8000.dbapi.connect(**kwargs)
         conn.autocommit = True
