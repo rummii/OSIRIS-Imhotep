@@ -36,7 +36,7 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 # BACKEND_URL must be set here too (not just in builder) so the standalone
 # server can read it at runtime.  Override at deploy time with --set-env-vars.
-ENV BACKEND_URL=https://osiris-imhotep-890958491914.europe-west1.run.app
+ENV BACKEND_URL=https://osiris-imhotep-gcrwj2qr2a-ew.a.run.app
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser  --system --uid 1001 --ingroup nodejs nextjs

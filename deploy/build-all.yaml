@@ -45,4 +45,4 @@ options:
   logging: "CLOUD_LOGGING_ONLY"
 
 substitutions:
-  _BACKEND_URL: https://osiris-imhotep-890958491914.europe-west1.run.app
+  _BACKEND_URL: https://osiris-imhotep-gcrwj2qr2a-ew.a.run.app
