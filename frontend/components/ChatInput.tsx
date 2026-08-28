@@ -24,6 +24,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
   const [showContext, setShowContext] = useState(false);
   const [media, setMedia] = useState<{ file: File; url: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isSubmittingRef = useRef(false);
 
   const addFiles = useCallback((fileList: FileList | null) => {
     if (!fileList) return;
@@ -57,12 +58,16 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    if (isSubmittingRef.current) return;          // drop concurrent invocations (Enter + button race)
+    isSubmittingRef.current = true;
     const submission: ChatSubmission = { notes, site, client, files: media.map((m) => m.file) };
     try {
       const succeeded = await onSubmit(submission);
       if (succeeded) clearAll();
     } catch {
       /* Preserve the draft if an unexpected client-side failure occurs. */
+    } finally {
+      isSubmittingRef.current = false;
     }
   };
 
@@ -109,7 +114,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && canSubmit) {
                 e.preventDefault();
                 void handleSubmit();
               }
