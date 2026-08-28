@@ -350,27 +350,70 @@ class SowService:
 
     @staticmethod
     def to_list_item(row: dict[str, Any]) -> dict[str, Any]:
+        def _to_iso(value: Any) -> str:
+            if value is None:
+                return ""
+            return str(value)
+
+        def _to_int_or_none(value: Any) -> int | None:
+            if value is None or value == "":
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                try:
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return None
+
         return {
             "id": row["id"],
             "title": row["title"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
+            "created_at": _to_iso(row.get("created_at")),
+            "updated_at": _to_iso(row.get("updated_at")),
             "is_published": bool(row["is_published"]),
-            "sow_id": row.get("sow_id"),
+            "sow_id": _to_int_or_none(row.get("sow_id")),
         }
 
     @staticmethod
     def to_detail(row: dict[str, Any]) -> dict[str, Any]:
+        def _to_str(value: Any, default: str = "") -> str:
+            if value is None:
+                return default
+            return str(value)
+
+        def _to_int(value: Any) -> int:
+            if value is None or value == "":
+                return 0
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                try:
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return 0
+
+        def _to_int_or_none(value: Any) -> int | None:
+            if value is None or value == "":
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                try:
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return None
+
         return {
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "sow_id": row.get("sow_id"),
-            "title": row["title"],
-            "content_md": row["content_md"],
-            "content_plain": row["content_plain"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            "is_published": bool(row["is_published"]),
+            "id": _to_int(row["id"]),
+            "user_id": _to_int(row["user_id"]),
+            "sow_id": _to_int_or_none(row.get("sow_id")),
+            "title": _to_str(row.get("title")),
+            "content_md": _to_str(row.get("content_md")),
+            "content_plain": _to_str(row.get("content_plain")),
+            "created_at": _to_str(row.get("created_at")),
+            "updated_at": _to_str(row.get("updated_at")),
+            "is_published": bool(row.get("is_published")),
         }
 
 
