@@ -1,4 +1,4 @@
-"""HTTP routes: health probe, SOW generation, Google Doc export."""
+"""HTTP routes: health probe and SOW generation."""
 from __future__ import annotations
 
 import json
@@ -16,14 +16,12 @@ from typing import Optional
 from app.config import get_settings
 from app.core.dependencies import get_current_user
 from app.models.schemas import (
-    ExportRequest,
     GenerateResponse,
     GroundingSource,
     MediaLogEntry,
     SowResponse,
     coerce_sow_payload,
 )
-from app.services.gdoc_service import GdocNotConfiguredError, GoogleDocsService
 from app.services.deepseek_service import DeepSeekAnalysisError, DeepSeekService
 from app.services.gemini_vision_service import GeminiVisionError, GeminiVisionService
 from app.services.media_processor import MediaBundle, process_uploads
@@ -33,7 +31,6 @@ from app.services.sow_service import SowService
 
 logger = logging.getLogger("osiris.routes")
 router = APIRouter()
-
 
 @router.get("/health")
 def health() -> dict:
@@ -45,9 +42,7 @@ def health() -> dict:
         "vision_model": settings.gemini_vision_model if settings.gemini_api_key else None,
         "grounding": False,
         "rag_provider": settings.rag_provider,
-        "gdoc_configured": bool(settings.google_service_account_file or settings.google_oauth_token_file),
     }
-
 
 @router.post("/sow/generate", response_model=GenerateResponse)
 def generate_sow(
@@ -144,88 +139,3 @@ def generate_sow(
         generated_at=datetime.now(timezone.utc).isoformat(),
         document_id=document_id,
     )
-
-
-@router.post("/sow/export-gdoc")
-def export_to_gdoc(
-    payload: ExportRequest,
-    _current_user: dict = Depends(get_current_user),  # login gate
-) -> dict:
-    """Convert a generated SOW JSON payload into a styled Google Doc.
-
-    The Google API work runs in a fresh subprocess: the long-lived uvicorn
-    worker threads can stall on Google's HTTPS endpoints on Windows, while a
-    fresh Python process completes reliably.
-    """
-    settings = get_settings()
-    try:
-        SowResponse.model_validate(payload.sow)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid SOW payload: {exc}") from exc
-
-    try:
-        doc_url, doc_id = _run_export_subprocess(payload.sow, payload.owner_email)
-    except GdocNotConfiguredError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Google Docs export failed.")
-        raise HTTPException(status_code=502, detail=f"Google Docs export failed: {exc}") from exc
-
-    return {"doc_url": doc_url, "doc_id": doc_id}
-
-
-def _run_export_subprocess(sow: dict, owner_email: str | None) -> tuple[str, str]:
-    """Spawn a fresh Python process that performs the Google Docs export.
-
-    Returns ``(doc_url, doc_id)`` or raises a descriptive exception.
-    """
-    backend_dir = Path(__file__).resolve().parent.parent.parent  # backend/
-    venv_python = backend_dir / ".venv" / "Scripts" / "python.exe"
-    if not venv_python.exists():
-        venv_python = Path(sys.executable)
-
-    input_fd, input_path = tempfile.mkstemp(suffix=".json", prefix="osiris_sow_")
-    output_fd, output_path = tempfile.mkstemp(suffix=".json", prefix="osiris_gdoc_")
-    os.close(input_fd)
-    os.close(output_fd)
-
-    try:
-        Path(input_path).write_text(
-            json.dumps({"sow": sow, "owner_email": owner_email}),
-            encoding="utf-8",
-        )
-        proc = subprocess.run(
-            [
-                str(venv_python),
-                "-m",
-                "app.services.gdoc_export_cli",
-                input_path,
-                output_path,
-            ],
-            cwd=str(backend_dir),
-            # No captured pipes: a spawned child (venv shim / multiprocessing)
-            # can keep stdout open and make subprocess.run wait forever. The
-            # result travels via the output file instead.
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=150,
-        )
-        out_file = Path(output_path)
-        if out_file.exists():
-            result = json.loads(out_file.read_text(encoding="utf-8"))
-        else:
-            result = {"ok": False, "error": f"export subprocess exited with code {proc.returncode} (no result)"}
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("Google Docs export timed out after 150s.") from exc
-    finally:
-        for path in (input_path, output_path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-
-    if not result.get("ok"):
-        if result.get("status") == 503:
-            raise GdocNotConfiguredError(result.get("error") or "Google Docs export is not configured.")
-        raise RuntimeError(result.get("error") or "unknown export error")
-    return str(result["doc_url"]), str(result["doc_id"])

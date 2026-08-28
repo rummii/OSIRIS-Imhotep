@@ -14,7 +14,7 @@ Google Doc**.
 │   · loading state │        │  ├─ deepseek_service (structured SOW JSON)    │
 │   · SOW tables    │        │  ├─ prompt_builder   (modular prompt)         │
 │   · loading state │        │  ├─ rag_provider     (RAG plug-in seam)       │
-│   · SOW tables    │        │  └─ gdoc_service     (Google Docs export)     │
+│   · SOW tables    │        │  └─ .docx export     (no Google account)       │
 │   · export button │        └──────────────────────────────────────────────┘
 └───────────────────┘
 ```
@@ -65,9 +65,6 @@ curl.exe http://localhost:8000/api/health
 | `DEEPSEEK_MODEL` | `deepseek-chat` (default) |
 | `GEMINI_API_KEY` | Required when analyzing photos or video clips |
 | `GEMINI_VISION_MODEL` | `gemini-2.5-flash` (default) |
-| `GOOGLE_SERVICE_ACCOUNT_FILE` | Path to SA JSON key for Google Docs export |
-| `GOOGLE_OAUTH_TOKEN_FILE` | Alternative OAuth user token |
-| `GOOGLE_DOCS_IMPERSONATE` | (Domain-wide delegation) email to impersonate |
 | `RAG_PROVIDER` / `RAG_ENDPOINT` / `RAG_API_KEY` | Future RAG/vector-DB plug-in (see §5) |
 
 ## 3. Frontend setup
@@ -129,17 +126,6 @@ Returns:
 }
 ```
 
-### `POST /api/sow/export-gdoc` — JSON
-
-```json
-{ "sow": { ...SOW payload... }, "owner_email": "engineer@company.com" }
-```
-
-Returns `{ "doc_url": "https://docs.google.com/document/d/<id>/edit", "doc_id": "..." }`.
-
-> **Google Docs auth note (MVP):** with a service account the doc is owned by
-> the SA. Pass `owner_email` so the doc is shared with the requesting engineer,
-> or use domain-wide delegation (`GOOGLE_DOCS_IMPERSONATE`).
 
 ## 5. Extensibility / RAG plug-in
 
@@ -161,7 +147,7 @@ backend/
   app/
     main.py                  # FastAPI app + CORS + lifespan
     config.py                # pydantic-settings (env / .env)
-    api/routes.py            # POST /api/sow/generate, /api/sow/export-gdoc, /health
+    api/routes.py            # POST /api/sow/generate, /health
     models/schemas.py        # Pydantic SOW response models
     core/context_provider.py # ContextProvider interface (RAG seam)
     services/
@@ -170,10 +156,9 @@ backend/
       gemini_vision_service.py # Gemini 2.5 Flash visual evidence extraction
       deepseek_service.py    # DeepSeek structured SOW generation
       rag_provider.py        # null + vector RAG providers
-      gdoc_service.py        # Google Docs styled export
 frontend/
   app/                       # Next.js App Router (page, layout, globals)
-  components/                # ChatInput, LoadingIndicator, SowReport, ExportButton, badges
+  components/                # ChatInput, LoadingIndicator, SowReport, badges
   lib/                       # api client + TS types
 ```
 

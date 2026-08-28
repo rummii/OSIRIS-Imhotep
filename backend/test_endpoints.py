@@ -32,8 +32,6 @@ TEST_SETTINGS = Settings(
     _env_file=None,
     deepseek_api_key="",
     gemini_api_key="",
-    google_service_account_file="",
-    google_oauth_token_file="",
     jwt_secret="test-secret-value",
     auth_db_path=TEST_DB,
     superadmin_username="admin",
@@ -100,17 +98,6 @@ def main() -> int:
         )
         assert r.status_code == 502 and "GEMINI_API_KEY" in r.json()["detail"], r.text
         print("MEDIA_502_OK")
-
-        # 7. Export without Google creds -> 503 --------------------------------
-        sample_sow = {
-            "project_title": "Roof Repair",
-            "executive_summary": {"overview": "x", "overall_condition": "Fair"},
-            "visual_findings": [], "recommended_services": [], "scope_breakdown": [],
-            "cost_breakdown": {},
-        }
-        r = client.post("/api/sow/export-gdoc", json={"sow": sample_sow}, headers=headers)
-        assert r.status_code == 503, r.text
-        print("EXPORT_503_OK")
 
         # 8. /me + change password ---------------------------------------------
         r = client.get("/api/auth/me", headers=headers)

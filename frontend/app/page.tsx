@@ -163,7 +163,6 @@ export default function Home() {
                   model={message.result.model}
                   grounding={message.result.grounding}
                   groundingSources={message.result.grounding_sources}
-                  docId={message.docId}
                 />
               )}
             </div>

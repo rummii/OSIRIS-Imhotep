@@ -46,12 +46,11 @@ The script (idempotent) will:
    user `osiris`.
 5. Prompt for your **DeepSeek** and **Gemini** API keys, then store everything
    in Secret Manager: `deepseek-api-key`, `gemini-api-key`, `jwt-secret`,
-   `superadmin-password`, `database-url`, `gdoc-sa-key`.
-6. Create the Google Docs exporter SA (`osiris-gdoc-sa`) and upload its key to
-   the `gdoc-sa-key` secret.
-7. Create `osiris-deploy-sa` (GitHub deployer) and `osiris-backend-sa` (runtime),
+   `superadmin-password`, `database-url`.
+
+6. Create `osiris-deploy-sa` (GitHub deployer) and `osiris-backend-sa` (runtime),
    then Wire Workload Identity Federation for **this** repo's `main` branch.
-8. Print the **3 values** to store as GitHub Actions secrets.
+7. Print the **3 values** to store as GitHub Actions secrets.
 
 > The Cloud SQL instance takes ~5–10 minutes to provision the first time.
 
@@ -112,7 +111,7 @@ password on first login (Account page).
 | Workflow auth fails (`Invalid OIDC token` / permission) | Confirm the 3 secrets exist and the WIF provider condition matches `main`; re-run `deploy/bootstrap.sh` |
 | `login` returns 401 after deploy | Backend seeds `admin` only when the users table is empty; if you redeployed with a different `SUPERADMIN_PASSWORD`, access the secret and use that password, or delete rows from the `osiris` DB |
 | `/api/health` unreachable | Confirm `--allow-unauthenticated`; check Cloud Run logs for startup errors |
-| Google Docs export 503 | Set the `gdoc-sa-key` secret (bootstrap step 6) and redeploy |
+
 | 502 on SOW generation | Check Cloud Run logs: DeepSeek/Gemini keys, or request timeout (>600s) — check `backend` service timeout |
 
 ---
@@ -123,7 +122,6 @@ Kept for reference. Old flow: build/upload from this PC with
 `deploy/gcp-deploy-local.ps1`, run `docker compose up -d` behind Caddy. Requires
 `gcloud` CLI + Docker locally and an always-on ~$13/mo VM. The modern flow above
 (Cloud Run) is cheaper, auto-scaling, and fully driven by the GitHub repo.
-
 
 ---
 
@@ -151,38 +149,8 @@ gcloud iam service-accounts keys create credentials/osiris-sa.json \
     --iam-account=osiris-sa@osiris-imhotep.iam.gserviceaccount.com
 ```
 
-- Docs/Drive APIs are already enabled (step 1).
-- Set `GOOGLE_SERVICE_ACCOUNT_FILE=/app/credentials/osiris-sa.json` in `.env.production`.
-- If the doc must be owned by a real Workspace user, enable Domain-wide Delegation and set
-  `GOOGLE_DOCS_IMPERSONATE=<user@yourdomain.com>`; otherwise each export shares the doc
-  with the engineer's `owner_email` (already supported by the API).
 
-> **⚠️ Service accounts canNOT create Google Docs (verified 2026-08).** The Google Docs API
-> rejects `docs.create` with `403 PERMISSION_DENIED` for service accounts in standalone
-> (non-Workspace) projects — the SA must belong to a Google Workspace domain. If your project
-> `spsasean` is not backed by Workspace, the export endpoint will fail with a clear message.
->
-> **Working alternative: user OAuth token.** Run the helper to mint a token for the account
-> that should own exported docs, then store it in Secret Manager and point the service at it:
->
-> ```bash
-> cd backend && .venv\Scripts\python.exe ..\deploy\setup_oauth_token.py
-> gcloud secrets create gdoc-oauth-token --data-file=backend/credentials/google-oauth-token.json
-> gcloud secrets add-iam-policy-binding gdoc-oauth-token \
->   --member=serviceAccount:890958491914-compute@developer.gserviceaccount.com \
->   --role=roles/secretmanager.secretAccessor
-> gcloud run services update osiris-imhotep --region=europe-west1 \
->   --update-secrets=GOOGLE_OAUTH_TOKEN_JSON=gdoc-oauth-token:latest \
->   --update-env-vars=GOOGLE_OAUTH_TOKEN_FILE=/tmp/app-data/oauth-token.json
-> ```
-> (`main.py` materialises `GOOGLE_OAUTH_TOKEN_JSON` → `GOOGLE_OAUTH_TOKEN_FILE` at startup.)
 
-> **⚠️ Cloud Run storage is ephemeral.** `AUTH_DB_PATH=/tmp/users.db` lives in the instance's
-> in-memory `/tmp`, so users, logins and saved SOW documents are reset whenever the service
-> scales to zero or recycles an instance. The exported Google Docs are the durable output.
-> For durable storage, point `DATABASE_URL` at Cloud SQL (the backend already supports
-> `postgres+pg8000://`; `SowStore` auto-uses Postgres when `DATABASE_URL` is set) and attach
-> the connection string as a Secret Manager secret.
 
 ## 3. Static IP + DNS
 
@@ -212,7 +180,7 @@ gcloud compute instances create osiris-vm \
     --boot-disk-size 30GB --boot-disk-type pd-balanced
 ```
 
-## 6. Build images (NOT on the VM — 1GB micro VMs OOM on `next build`)
+## 5. Build images (NOT on the VM — 1GB micro VMs OOM on `next build`)
 
 Do this locally or in CI, then push to Artifact Registry:
 
@@ -234,7 +202,7 @@ docker push us-central1-docker.pkg.dev/osiris-imhotep/osiris/backend:latest
 > testing). On the VM, either sync the full repo there, or switch compose to
 > `image:` tags pointing at Artifact Registry.
 
-## 7. Deploy from your local machine folder (no git)
+## 6. Deploy from your local machine folder (no git)
 
 From a PowerShell window **on this machine**, after creating `.env.production`
 from `.env.production.example`:
@@ -268,7 +236,7 @@ runcmd:
   - systemctl enable --now docker
 ```
 
-## 8. Point the Caddyfile at your real domain
+## 7. Point the Caddyfile at your real domain
 
 Edit `/opt/osiris/Caddyfile` — replace `yourdomain.com` — then:
 
@@ -281,7 +249,7 @@ cd /opt/osiris && docker compose restart caddy
 
 ```bash
 curl -s https://app.yourdomain.com/api/health
-# {"status":"ok", ..., "gdoc_configured":true}
+# {"status":"ok", ...}
 
 # Login through the proxy (single-origin — no CORS in the browser)
 curl -s -X POST https://app.yourdomain.com/api/auth/login \

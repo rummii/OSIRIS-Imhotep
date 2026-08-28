@@ -422,62 +422,6 @@ class SowService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this document.")
         return row
 
-    def export_to_gdoc(
-        self, doc_id: int, owner_email: str | None, settings: Settings
-    ) -> tuple[str, str]:
-        from fastapi import HTTPException, status
-        from app.services.gdoc_service import GdocNotConfiguredError
-        row = self.store.get(doc_id)
-        if not row:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
-
-        try:
-            sow_dict = json.loads(row["content_plain"])
-        except (json.JSONDecodeError, TypeError) as exc:
-            raise RuntimeError(f"Stored document is corrupted: {exc}") from exc
-
-        input_fd, input_path = tempfile.mkstemp(suffix=".json", prefix="osiris_sow_")
-        output_fd, output_path = tempfile.mkstemp(suffix=".json", prefix="osiris_gdoc_")
-        os.close(input_fd)
-        os.close(output_fd)
-
-        try:
-            Path(input_path).write_text(
-                json.dumps({"sow": sow_dict, "owner_email": owner_email}),
-                encoding="utf-8",
-            )
-            venv_python = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
-            if not venv_python.exists():
-                venv_python = Path(sys.executable)
-
-            proc = subprocess.run(
-                [str(venv_python), "-m", "app.services.gdoc_export_cli", input_path, output_path],
-                cwd=str(BACKEND_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=150,
-            )
-            out_file = Path(output_path)
-            if out_file.exists():
-                result = json.loads(out_file.read_text(encoding="utf-8"))
-            else:
-                result = {"ok": False, "error": f"export subprocess exited {proc.returncode}"}
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError("Google Docs export timed out after 150s.") from exc
-        finally:
-            for p in (input_path, output_path):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
-
-        if not result.get("ok"):
-            if result.get("status") == 503:
-                raise GdocNotConfiguredError(result.get("error") or "Google Docs export is not configured.")
-            raise RuntimeError(result.get("error") or "Unknown export error")
-
-        return str(result["doc_url"]), str(result["doc_id"])
-
 
 # ---------------------------------------------------------------------------
 # Markdown / plaintext helpers

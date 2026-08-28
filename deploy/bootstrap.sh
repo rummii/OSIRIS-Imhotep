@@ -14,8 +14,8 @@
 #
 # What it creates (idempotent — safe to re-run):
 #   1. Artifact Registry  osiris-images
-#   2. Secret Manager secrets (DeepSeek, Gemini, JWT, superadmin, DB URL, gdoc SA)
-#   3. Service accounts: osiris-deploy-sa, osiris-backend-sa, osiris-gdoc-sa
+#   2. Secret Manager secrets (DeepSeek, Gemini, JWT, superadmin, DB URL)
+#   3. Service accounts: osiris-deploy-sa, osiris-backend-sa
 #   4. Workload Identity Federation for GitHub Actions (keyless auth)
 #   5. Prints the 3 values to store as GitHub Actions secrets
 #
@@ -33,7 +33,6 @@ DB_USER="osiris"
 ARTIFACT_REPO="osiris-images"
 DEPLOY_SA="osiris-deploy-sa"
 BACKEND_SA="osiris-backend-sa"
-GDOC_SA="osiris-gdoc-sa"
 WIF_POOL="osiris-github-pool"
 WIF_PROVIDER="osiris-github-provider"
 
@@ -108,22 +107,6 @@ secret gemini-api-key      "$GEMINI_API_KEY"
 secret jwt-secret          "$JWT_SECRET"
 secret superadmin-password "$SUPERADMIN_PASSWORD"
 secret database-url        "$DATABASE_URL"
-
-step "Google Docs service account + SA key secret"
-if ! gcloud iam service-accounts describe "$GDOC_SA@$PROJECT_ID.iam.gserviceaccount.com" >/dev/null 2>&1; then
-  gcloud iam service-accounts create "$GDOC_SA" --display-name="OSIRIS Docs exporter"
-fi
-mkdir -p credentials
-gcloud iam service-accounts keys create credentials/osiris-sa.json \
-  --iam-account="$GDOC_SA@$PROJECT_ID.iam.gserviceaccount.com" >/dev/null 2>&1 || true
-if [ -f credentials/osiris-sa.json ]; then
-  if ! gcloud secrets describe gdoc-sa-key >/dev/null 2>&1; then
-    gcloud secrets create gdoc-sa-key --replication-policy=automatic >/dev/null
-  fi
-  gcloud secrets versions add gdoc-sa-key --data-file=credentials/osiris-sa.json >/dev/null
-  echo "  SA key saved to credentials/osiris-sa.json AND uploaded to gdoc-sa-key secret."
-  echo "  NOTE: delete this local file when done (the secret already holds it)."
-fi
 
 
 step "Deploy + runtime service accounts"

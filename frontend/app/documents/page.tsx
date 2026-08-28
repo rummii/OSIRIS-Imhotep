@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Download, FileText, Trash2, ExternalLink, Plus } from "lucide-react";
+import { ArrowLeft, Download, FileText, Trash2, Plus } from "lucide-react";
 import {
   listSowDocuments,
   deleteSowDocument,
-  exportSowToGdoc,
   downloadSowDocx,
   type SowDocumentListItem,
 } from "@/lib/api";
@@ -17,7 +16,6 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<SowDocumentListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [exportingId, setExportingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,21 +47,7 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleExport = async (doc: SowDocumentListItem) => {
-    setExportingId(doc.id);
-    setError("");
-    try {
-      const result = await exportSowToGdoc(doc.id);
-      window.open(result.doc_url, "_blank");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Export failed");
-    } finally {
-      setExportingId(null);
-    }
-  };
-
   const user = getCachedUser();
-
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -103,7 +87,6 @@ export default function DocumentsPage() {
         {error && (
           <p className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-600">{error}</p>
         )}
-
 
         {loading ? (
           <div className="py-16 text-center">
@@ -155,15 +138,6 @@ export default function DocumentsPage() {
                   >
                     <Download size={13} />
                     Download .docx
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExport(doc)}
-                    disabled={exportingId === doc.id}
-                    className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
-                  >
-                    <ExternalLink size={13} />
-                    {exportingId === doc.id ? "Exporting…" : "Google Docs"}
                   </button>
                   <button
                     type="button"

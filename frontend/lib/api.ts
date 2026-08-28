@@ -1,4 +1,4 @@
-import type { ExportResponse, GenerateResponse, SowResponse } from "./types";
+import type { GenerateResponse, SowResponse } from "./types";
 import { authHeaders, handleUnauthorized } from "./auth";
 
 async function parseError(res: Response): Promise<string> {
@@ -110,7 +110,6 @@ export async function adminResetPassword(id: number, newPassword: string): Promi
   if (!res.ok) throw new Error(await parseError(res));
 }
 
-
 export interface GenerateParams {
   notes: string;
   site: string;
@@ -161,27 +160,8 @@ export async function saveFromGeneration(
   return res.json();
 }
 
-/**
- * POST /api/sow/{docId}/export-gdoc — re-export a previously saved document
- * to Google Docs using the server-assigned doc id.
- */
-export async function exportToGoogleDoc(
-  docId: number,
-  ownerEmail?: string
-): Promise<ExportResponse> {
-  const res = await fetch(`/api/sow/${docId}/export-gdoc`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ owner_email: ownerEmail || null }),
-  });
-  if (handleUnauthorized(res)) throw new Error("Session expired");
-  if (!res.ok) throw new Error(await parseError(res));
-  return res.json();
-}
-
-
 // ---------------------------------------------------------------------------
-// SOW document persistence (local storage + on-demand Google Docs export)
+// SOW document persistence
 // ---------------------------------------------------------------------------
 
 export interface SowDocumentListItem {
@@ -270,18 +250,6 @@ export async function deleteSowDocument(id: number): Promise<void> {
   });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
-}
-
-/** POST /api/sow/:id/export-gdoc — on-demand Google Docs export of a saved doc. */
-export async function exportSowToGdoc(id: number): Promise<{ doc_url: string; doc_id: string }> {
-  const res = await fetch(`/api/sow/${id}/export-gdoc`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({}),
-  });
-  if (handleUnauthorized(res)) throw new Error("Session expired");
-  if (!res.ok) throw new Error(await parseError(res));
-  return res.json();
 }
 
 /** GET /api/sow/:id/download-docx — download the SOW as a .docx file. */

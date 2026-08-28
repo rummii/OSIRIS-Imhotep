@@ -3,7 +3,6 @@
 import { FileSpreadsheet, Wrench, ListChecks, Wallet, Eye } from "lucide-react";
 import type { SowResponse } from "@/lib/types";
 import { SeverityBadge, PriorityBadge } from "./badges";
-import ExportButton from "./ExportButton";
 
 const CURRENCY_SYMBOLS: Record<string, string> = { PHP: "₱", USD: "$" };
 
@@ -52,17 +51,13 @@ interface SowReportProps {
   sow: SowResponse;
   model: string;
   grounding: boolean;
-  groundingSources: { title: string; url: string }[];
-  /** Server-assigned doc id (undefined while auto-save is in flight). */
-  docId?: number;
-}
+  groundingSources: { title: string; url: string }[];}
 
 export default function SowReport({
   sow,
   model,
   grounding,
   groundingSources,
-  docId,
 }: SowReportProps) {
   const currency = sow.currency || "PHP";
 
@@ -79,9 +74,6 @@ export default function SowReport({
             <p className="mt-1 text-xs text-slate-500">
               {[sow.client && `Client: ${sow.client}`, sow.site && `Site: ${sow.site}`, sow.generated_at && new Date(sow.generated_at).toLocaleString()].filter(Boolean).join("  ·  ")}
             </p>
-          </div>
-          <div className="w-full sm:w-72">
-            <ExportButton docId={docId} />
           </div>
         </div>
       </div>
@@ -143,7 +135,6 @@ export default function SowReport({
           </div>
         )}
       </div>
-
 
       {/* 3. Recommended services */}
       <div className="card p-5 space-y-3">
@@ -226,7 +217,6 @@ export default function SowReport({
           </div>
         )}
       </div>
-
 
       {/* 5. Cost breakdown */}
       <div className="card p-5 space-y-3">

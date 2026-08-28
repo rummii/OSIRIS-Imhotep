@@ -31,10 +31,6 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_vision_model: str = "gemini-2.5-flash"
 
-    # --- Google Docs export ---
-    google_service_account_file: str = ""
-    google_oauth_token_file: str = ""
-    google_docs_impersonate: str = ""
 
     # --- App ---
     app_name: str = "OSIRIS Imhotep — Engineering SOW API"

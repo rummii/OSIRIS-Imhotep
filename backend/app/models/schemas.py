@@ -112,12 +112,10 @@ SOW_SCHEMA: dict[str, Any] = {
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-
 class ExecutiveSummary(BaseModel):
     overview: str = ""
     overall_condition: str = "Not assessed"
     priority_findings: Optional[str] = None
-
 
 class VisualFinding(BaseModel):
     id: str = ""
@@ -128,7 +126,6 @@ class VisualFinding(BaseModel):
     description: str = ""
     oem_reference: Optional[str] = None
     recommended_action: str = ""
-
 
 class RecommendedService(BaseModel):
     id: str = ""
@@ -141,13 +138,11 @@ class RecommendedService(BaseModel):
     total_cost: float = 0.0
     notes: Optional[str] = None
 
-
 class ScopeItem(BaseModel):
     phase: str = ""
     work_description: str = ""
     deliverables: list[str] = Field(default_factory=list)
     duration_days: int = 0
-
 
 class CostBreakdown(BaseModel):
     currency: str = "PHP"
@@ -171,11 +166,9 @@ class SowResponse(BaseModel):
     scope_breakdown: list[ScopeItem] = Field(default_factory=list)
     cost_breakdown: CostBreakdown = Field(default_factory=CostBreakdown)
 
-
 class GroundingSource(BaseModel):
     title: str = ""
     url: str = ""
-
 
 class MediaLogEntry(BaseModel):
     filename: str
@@ -183,7 +176,6 @@ class MediaLogEntry(BaseModel):
     status: str = "ok"
     detail: str = ""
     frames: int = 0
-
 
 class GenerateResponse(BaseModel):
     sow: SowResponse
@@ -195,18 +187,14 @@ class GenerateResponse(BaseModel):
     generated_at: str = ""
     document_id: Optional[int] = None
 
-
-class ExportRequest(BaseModel):
-    """Body of POST /api/sow/export-gdoc."""
+    """Body of POST /api/sow/from-generation (used by auto-save)."""
 
     sow: dict[str, Any]
     owner_email: Optional[str] = None
 
-
 # ---------------------------------------------------------------------------
 # Lenient coercion from raw Gemini JSON -> SowResponse
 # ---------------------------------------------------------------------------
-
 
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -214,13 +202,11 @@ def _to_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
 
-
 def _to_int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
     except (TypeError, ValueError):
         return default
-
 
 def coerce_sow_payload(data: dict[str, Any]) -> SowResponse:
     """Normalise a raw Gemini JSON object into a validated ``SowResponse``.

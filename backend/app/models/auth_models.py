@@ -71,9 +71,9 @@ class MessageResponse(BaseModel):
 class SowDocument(BaseModel):
     """A SOW document stored locally on the backend (Markdown + plain text).
 
-    Used when Google Docs export is optional -- the document is saved to the
-    backend database and can be rendered in the frontend or exported to a
-    Google Doc on-demand via POST /api/sow/{id}/export-gdoc.
+    A saved Scope of Work document. The document is stored in the backend
+    database and rendered in the frontend; users can download it as .docx
+    via GET /api/sow/{id}/download-docx.
     """
     id: int
     user_id: int
