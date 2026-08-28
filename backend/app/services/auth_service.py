@@ -203,7 +203,8 @@ class UserStore:
     def _init_pg_schema(self) -> None:
         conn = self._connect_postgres()
         try:
-            conn.execute(
+            cur = conn.cursor()
+            cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id BIGSERIAL PRIMARY KEY,
@@ -220,6 +221,7 @@ class UserStore:
                 )
                 """
             )
+            cur.close()
         finally:
             conn.close()
 
