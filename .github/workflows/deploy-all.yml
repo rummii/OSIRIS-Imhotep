@@ -1,6 +1,6 @@
 # OSIRIS Imhotep — GitHub Actions: trigger Cloud Build on push to main.
 # Auth uses Workload Identity Federation (no stored keys).
-# Required GitHub secrets: GCP_PROJECT_ID, GCP_REGION, WIF_PROVIDER, WIF_SERVICE_ACCOUNT
+# Required GitHub secrets: GCP_PROJECT_ID, GCP_WIF_PROVIDER, GCP_DEPLOY_SA
 name: Deploy to Cloud Run
 
 on:
@@ -23,8 +23,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
 
       - name: Submit build
         run: |
