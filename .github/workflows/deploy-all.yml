@@ -1,4 +1,4 @@
-# OSIRIS Imhotep — GitHub Actions: trigger Cloud Build on push to main.
+# OSIRIS Imhotep — GitHub Actions: build + deploy both Cloud Run services on push to main.
 # Auth uses Workload Identity Federation (no stored keys).
 # Required GitHub secrets: GCP_PROJECT_ID, GCP_WIF_PROVIDER, GCP_DEPLOY_SA
 name: Deploy to Cloud Run
@@ -12,8 +12,12 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  BACKEND_REGION: europe-west1
+  FRONTEND_REGION: us-central1
+
 jobs:
-  build:
+  build-deploy:
     name: Build + Deploy via Cloud Build
     runs-on: ubuntu-latest
     steps:
@@ -26,9 +30,41 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SA }}
 
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
       - name: Submit build
         run: |
           gcloud builds submit \
             --config=deploy/build-all.yaml \
             --project=${{ secrets.GCP_PROJECT_ID }} \
             --substitutions=_TAG=$(git rev-parse --short HEAD)
+
+      - name: Deploy backend to Cloud Run
+        run: |
+          gcloud run deploy osiris-imhotep \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --region=${{ env.BACKEND_REGION }} \
+            --image=europe-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:$(git rev-parse --short HEAD) \
+            --allow-unauthenticated \
+            --set-secrets="DEEPSEEK_API_KEY=deepseek-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,JWT_SECRET=jwt-secret:latest,SUPERADMIN_PASSWORD=superadmin-password:latest,DATABASE_URL=database-url:latest" \
+            --set-secrets="GOOGLE_SERVICE_ACCOUNT_JSON=gdoc-sa-key:latest" \
+            --set-env-vars=GOOGLE_SERVICE_ACCOUNT_FILE=/tmp/app-data/osiris-sa.json
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy osiris-frontend \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --region=${{ env.FRONTEND_REGION }} \
+            --image=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/osiris/frontend:$(git rev-parse --short HEAD) \
+            --allow-unauthenticated \
+            --set-env-vars=BACKEND_URL=https://osiris-imhotep-gcrwj2qr2a-ew.a.run.app
+
+      - name: Smoke test backend
+        run: |
+          URL=$(gcloud run services describe osiris-imhotep \
+            --project=${{ secrets.GCP_PROJECT_ID }} --region=${{ env.BACKEND_REGION }} \
+            --format='value(status.url)')
+          echo "Backend URL: $URL"
+          curl -sf "${URL}/api/health" | head -c 300
+          echo ""
