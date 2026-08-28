@@ -19,7 +19,7 @@ type Message =
       client: string;
       media: { name: string; kind: string }[];
     }
-  | { role: "assistant"; result: GenerateResponse; docId: number | null }
+  | { role: "assistant"; result: GenerateResponse; docId: number | undefined }
   | { role: "error"; message: string };
 
 export default function Home() {
@@ -63,7 +63,7 @@ export default function Home() {
     try {
       const result = await generateSow(submission);
       // Auto-save so the SOW appears in the Documents list and can be re-exported.
-      let docId: number | null = null;
+      let docId: number | undefined;
       try {
         const saved = await saveFromGeneration(result.sow);
         docId = saved.id;
