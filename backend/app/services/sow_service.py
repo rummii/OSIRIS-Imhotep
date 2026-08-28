@@ -5,14 +5,8 @@ so they travel together and are cleaned up automatically when a user is deleted.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import sqlite3
-import subprocess
-import sys
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 

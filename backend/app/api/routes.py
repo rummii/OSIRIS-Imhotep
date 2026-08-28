@@ -1,14 +1,7 @@
 """HTTP routes: health probe and SOW generation."""
 from __future__ import annotations
 
-import json
 import logging
-import os
-import subprocess
-import sys
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from typing import Optional

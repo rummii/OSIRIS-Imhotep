@@ -178,6 +178,7 @@ class MediaLogEntry(BaseModel):
     frames: int = 0
 
 class GenerateResponse(BaseModel):
+    """Response body of POST /api/sow/generate."""
     sow: SowResponse
     media_log: list[MediaLogEntry] = Field(default_factory=list)
     model: str = ""
@@ -186,11 +187,6 @@ class GenerateResponse(BaseModel):
     context_provider: str = "null"
     generated_at: str = ""
     document_id: Optional[int] = None
-
-    """Body of POST /api/sow/from-generation (used by auto-save)."""
-
-    sow: dict[str, Any]
-    owner_email: Optional[str] = None
 
 # ---------------------------------------------------------------------------
 # Lenient coercion from raw Gemini JSON -> SowResponse
