@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, KeyRound, Plus, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Database, KeyRound, Plus, RefreshCw, UserPlus, Users } from "lucide-react";
 import {
   adminCreateUser,
+  adminListAuditLog,
   adminListUsers,
+  adminRagRefresh,
+  adminRagStats,
   adminResetPassword,
   adminUpdateUser,
+  type AuditLogItem,
+  type AuditLogResponse,
+  type RagStatsResponse,
 } from "@/lib/api";
 import { clearAuth, getCachedUser, getToken, type SessionUser } from "@/lib/auth";
 
@@ -34,6 +40,66 @@ export default function AdminPage() {
   const [resetFor, setResetFor] = useState<number | null>(null);
   const [resetPw, setResetPw] = useState("");
 
+  // RAG card state
+  const [ragStats, setRagStats] = useState<RagStatsResponse | null>(null);
+  const [ragLoading, setRagLoading] = useState(false);
+  const [ragRefreshing, setRagRefreshing] = useState(false);
+  const [ragNotice, setRagNotice] = useState("");
+
+  // Phase 5 Track 2: Audit log state
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditFilter, setAuditFilter] = useState<{ user_id?: number; action?: string }>({});
+
+  const loadRagStats = useCallback(async () => {
+    try {
+      const me = await adminRagStats();
+      setRagStats(me);
+    } catch {
+      // silently ignore — caller is superadmin and card is hidden if not
+    }
+  }, []);
+
+  const loadAuditLogs = useCallback(async () => {
+    setAuditLoading(true);
+    setAuditError("");
+    try {
+      const res: AuditLogResponse = await adminListAuditLog({
+        ...auditFilter,
+        limit: 50,
+        offset: 0,
+      });
+      setAuditLogs(res.items);
+      setAuditTotal(res.total);
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : "Failed to load audit log");
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [auditFilter]);
+
+  const doRagRefresh = useCallback(async () => {
+    setRagRefreshing(true);
+    setRagNotice("");
+    try {
+      const stats = await adminRagRefresh();
+      // After refresh, re-fetch the full stats shape so total_chunks / sources
+      // remain consistent with /admin/rag/stats.
+      const fresh = await adminRagStats();
+      setRagStats({
+        ...fresh,
+        last_refresh_at: new Date().toISOString(),
+      });
+      setRagNotice(`Refreshed — ${stats.chunks_embedded} chunks embedded in ${stats.duration_seconds}s.`);
+    } catch (err) {
+      setRagNotice(err instanceof Error ? err.message : "Refresh failed.");
+    } finally {
+      setRagRefreshing(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     try {
       setUsers((await adminListUsers()) as unknown as AdminUser[]);
@@ -42,14 +108,21 @@ export default function AdminPage() {
     }
   }, []);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!getToken() || getCachedUser()?.role !== "superadmin") {
       router.replace("/");
       return;
     }
     setMe(getCachedUser());
     void load();
-  }, [load, router]);
+    void loadRagStats();
+    void loadAuditLogs();
+  }, [load, loadRagStats, loadAuditLogs, router]);
+
+  useEffect(() => {
+    const id = setInterval(() => { void loadAuditLogs(); }, 10_000);
+    return () => clearInterval(id);
+  }, [loadAuditLogs]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -248,8 +321,137 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+                </section>
+
+        {/* Phase 1 — RAG Corpus Management */}
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center gap-2">
+            <Database size={18} className="text-indigo-600" />
+            <h2 className="text-base font-semibold text-slate-900">RAG Regulatory Corpus</h2>
+            {ragStats && (
+              <span className="ml-auto rounded bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                {ragStats.total_chunks} chunks &middot; {ragStats.engine}
+              </span>
+            )}
+          </div>
+
+          {ragStats ? (
+            <div className="space-y-3">
+              <div className="overflow-hidden rounded-lg border border-slate-100">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-slate-500">
+                      <th className="px-3 py-2 font-medium">Source</th>
+                      <th className="px-3 py-2 font-medium">Domain</th>
+                      <th className="px-3 py-2 font-medium">Jurisdiction</th>
+                      <th className="px-3 py-2 text-right font-medium">Chunks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {ragStats.sources.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-3 text-center text-slate-400 italic">
+                          No chunks indexed yet. Run a refresh below.
+                        </td>
+                      </tr>
+                    ) : (
+                      ragStats.sources.map((s) => (
+                        <tr key={s.source} className="hover:bg-slate-50">
+                          <td className="px-3 py-2 font-mono text-slate-700">{s.source}</td>
+                          <td className="px-3 py-2 text-slate-600">{s.domain}</td>
+                          <td className="px-3 py-2 text-slate-600">{s.jurisdiction}</td>
+                          <td className="px-3 py-2 text-right font-medium text-slate-800">{s.chunks}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                {ragStats.last_refresh_at
+                  ? `Last refreshed: ${new Date(ragStats.last_refresh_at).toLocaleString()}`
+                  : "Never refreshed"}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => { void doRagRefresh(); }}
+                disabled={ragRefreshing}
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={ragRefreshing ? "animate-spin" : ""} />
+                {ragRefreshing ? "Embedding ..." : "Refresh Corpus"}
+              </button>
+
+              {ragNotice && (
+                <p className={`text-xs ${ragNotice.includes("Refreshed") ? "text-emerald-600" : "text-red-500"}`}>
+                  {ragNotice}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 italic">Loading RAG stats ...</p>
+          )}
         </section>
 
+
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-4 flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">Audit Log</h2>
+            {auditTotal > 0 && (
+              <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{auditTotal} entries</span>
+            )}
+            <button type="button" onClick={() => { void loadAuditLogs(); }}
+              className="ml-2 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900">
+              <RefreshCw size={12} /> Refresh
+            </button>
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <select value={auditFilter.action ?? ""}
+              onChange={(e) => setAuditFilter({ ...auditFilter, action: e.target.value || undefined })}
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-600">
+              <option value="">All actions</option>
+              <option value="login">login</option>
+              <option value="logout">logout</option>
+              <option value="doc_save">doc_save</option>
+              <option value="doc_delete">doc_delete</option>
+              <option value="doc_export">doc_export</option>
+              <option value="sow_generate">sow_generate</option>
+              <option value="user_create">user_create</option>
+              <option value="rag_refresh">rag_refresh</option>
+              <option value="rate_limited">rate_limited</option>
+              <option value="quota_exceeded">quota_exceeded</option>
+            </select>
+          </div>
+          {auditError && <p className="mb-2 text-xs text-red-500">{auditError}</p>}
+          {auditLoading && auditLogs.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">Loading...</p>
+          ) : auditLogs.length === 0 ? (
+            <p className="text-xs text-slate-400 italic">No audit entries yet.</p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-100">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 border-b border-slate-100 bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
+                  <tr><th className="px-3 py-2">When</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Action</th><th className="px-3 py-2">Target</th><th className="px-3 py-2">Outcome</th><th className="px-3 py-2">Detail</th><th className="px-3 py-2">IP</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {auditLogs.map((entry) => (
+                    <tr key={entry.id} className="hover:bg-slate-50">
+                      <td className="px-3 py-1.5 whitespace-nowrap text-slate-500">{entry.ts ? new Date(entry.ts).toLocaleString() : "-"}</td>
+                      <td className="px-3 py-1.5"><span className="font-medium text-slate-800">{entry.username ?? "-"}</span>{entry.role && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">{entry.role}</span>}</td>
+                      <td className="px-3 py-1.5 text-slate-700">{entry.action}</td>
+                      <td className="px-3 py-1.5 text-slate-500">{entry.target_type ? entry.target_type + (entry.target_id ? "/" + entry.target_id : "") : "-"}</td>
+                      <td className="px-3 py-1.5"><span className={entry.outcome === "success" ? "text-emerald-600" : entry.outcome === "failure" ? "text-red-500" : entry.outcome === "denied" ? "text-red-600 font-semibold" : "text-slate-600"}>{entry.outcome}</span></td>
+                      <td className="px-3 py-1.5 max-w-xs truncate text-slate-400" title={entry.detail ?? ""}>{entry.detail ?? "-"}</td>
+                      <td className="px-3 py-1.5 font-mono text-slate-400 text-[10px]">{entry.ip_address ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
         <div className="flex justify-end">
           <button type="button"
             onClick={() => { clearAuth(); router.replace("/login"); }}

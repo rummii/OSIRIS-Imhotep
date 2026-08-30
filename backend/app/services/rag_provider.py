@@ -1,15 +1,18 @@
-"""Context provider registry + a ready-made vector DB adapter placeholder.
+﻿"""Context provider registry + vector DB adapters.
 
-The MVP default is the ``null`` provider. To wire in a private RAG /
-vector database (internal pricing, SOPs, past project histories):
+Two RAG adapters ship:
 
-1. Implement retrieval against your vector store in a new class here
-   (the ``HttpRagContextProvider`` below is a working skeleton that POSTs a
-   query to a generic HTTP endpoint and parses ``{documents: [...]}``).
-2. Set ``RAG_PROVIDER=vector`` and ``RAG_ENDPOINT`` in ``backend/.env``.
+* ``HttpRagContextProvider``      — POSTs the query to a configurable HTTP
+  endpoint (e.g. a hosted vector-DB retrieval service).
+* ``SqliteVecRagContextProvider`` — embeds the query with Gemini
+  ``text-embedding-004`` and searches a local SQLite vector store
+  (sqlite-vec, with a numpy-fallback path). Recommended default for
+  self-contained deployments.
 
-Nothing else in the codebase needs to change — the prompt builder and the
-``/api/sow/generate`` route only depend on the ``ContextProvider`` interface.
+Set ``RAG_PROVIDER=sqlite_vec`` (or ``vector``) in ``backend/.env`` to
+activate. Nothing else in the codebase needs to change — the prompt
+builder and the ``/api/sow/generate`` route only depend on the
+:class:`ContextProvider` interface.
 """
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from typing import Any
+from typing import Any, Optional
 
 from app.config import Settings
 from app.core.context_provider import (
@@ -85,6 +88,88 @@ class HttpRagContextProvider(ContextProvider):
         return docs
 
 
+class SqliteVecRagContextProvider(ContextProvider):
+    """Local RAG over the SQLite vector store (see ``app.core.vector_store``).
+
+    Each query is embedded with Gemini ``text-embedding-004`` and the top-k
+    most similar chunks are returned. Falls back to no-context behaviour if
+    the embedder is unavailable (missing API key, network failure) so a
+    misconfigured RAG layer never breaks SOW generation.
+    """
+
+    name = "sqlite_vec"
+
+    def __init__(
+        self,
+        db_path: str,
+        api_key: str = "",
+        top_k: int = 5,
+        domain_filter: Optional[str] = None,
+    ) -> None:
+        # Local imports to avoid pulling google-genai at module load
+        # (the file is imported by main.py and admin routes alike).
+        from app.core.vector_store import VectorStore
+        from app.services.embedder import get_embedder
+
+        self._store = VectorStore(db_path)
+        self._embedder = None
+        self._api_key = api_key
+        self._top_k = top_k
+        self._domain_filter = domain_filter
+        if api_key:
+            try:
+                self._embedder = get_embedder(api_key)
+            except Exception as exc:  # pragma: no cover
+                logger.error("Failed to initialise GeminiEmbedder: %s", exc)
+        else:
+            logger.warning(
+                "SqliteVecRagContextProvider created without GEMINI_API_KEY; "
+                "retrieval will return no context."
+            )
+
+    def retrieve(self, notes: str, media_summary: str) -> list[ContextDocument]:
+        if self._embedder is None:
+            return []
+        query = (notes or "").strip() or (media_summary or "").strip()
+        if not query:
+            return []
+        try:
+            embedding = self._embedder.embed_sync(query)
+        except Exception as exc:
+            logger.error("Query embedding failed: %s", exc)
+            return []
+        try:
+            rows = self._store.search(
+                embedding,
+                k=self._top_k,
+                domain_filter=self._domain_filter,
+            )
+        except Exception as exc:
+            logger.error("Vector store search failed: %s", exc)
+            return []
+
+        docs: list[ContextDocument] = []
+        for row in rows:
+            source = f"rag:{row.get('source', 'unknown')}"
+            citation = row.get("citation", "")
+            content = row["chunk_text"]
+            if citation:
+                content = f"[{citation}] {content}"
+            docs.append(
+                ContextDocument(
+                    source=source,
+                    content=content,
+                    metadata={
+                        "domain": row.get("domain", ""),
+                        "jurisdiction": row.get("jurisdiction", ""),
+                        "citation": citation,
+                        "similarity": row.get("similarity", 0.0),
+                    },
+                )
+            )
+        return docs
+
+
 def get_context_provider(settings: Settings) -> ContextProvider:
     """Build the configured context provider chain.
 
@@ -93,11 +178,21 @@ def get_context_provider(settings: Settings) -> ContextProvider:
     """
     providers: list[ContextProvider] = []
 
-    if settings.rag_provider.strip().lower() == "vector":
+    rag = settings.rag_provider.strip().lower()
+    if rag == "vector":
         providers.append(
             HttpRagContextProvider(
                 endpoint=settings.rag_endpoint,
                 api_key=settings.rag_api_key,
+                top_k=settings.rag_top_k,
+            )
+        )
+    elif rag == "sqlite_vec":
+        providers.append(
+            SqliteVecRagContextProvider(
+                db_path=settings.rag_db_path,
+                api_key=settings.gemini_api_key,
+                top_k=settings.rag_top_k,
             )
         )
 

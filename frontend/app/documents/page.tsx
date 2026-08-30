@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Download, FileText, Trash2, Plus } from "lucide-react";
+import { ArrowLeft, Download, Eye, FileText, Trash2, Plus } from "lucide-react";
 import {
   listSowDocuments,
   deleteSowDocument,
@@ -183,6 +183,14 @@ export default function DocumentsPage() {
                 </div>
 
                 <div className="mt-4 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/documents/${doc.id}`)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    <Eye size={13} />
+                    View
+                  </button>
                   <button
                     type="button"
                     onClick={() => void downloadSowDocx(doc)}

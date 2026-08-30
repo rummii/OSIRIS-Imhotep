@@ -12,12 +12,16 @@ single bad attachment never takes down a whole analysis run.
 """
 from __future__ import annotations
 
+import io
 import logging
 import os
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional
 
 import cv2
+import exifread
 import numpy as np
 from fastapi import UploadFile
 
@@ -41,6 +45,30 @@ JPEG_QUALITY = 85             # re-encode quality for images / sampled frames
 
 
 @dataclass
+class SpatialMetadata:
+    """GPS/EXIF spatial metadata extracted from an image or video."""
+    latitude: Optional[float] = None          # decimal degrees
+    longitude: Optional[float] = None
+    altitude_m: Optional[float] = None        # meters above WGS84 ellipsoid
+    accuracy_m: Optional[float] = None        # horizontal accuracy in meters
+    captured_at: Optional[str] = None         # ISO 8601 timestamp from EXIF
+    source_file: str = ""                     # original filename
+
+    def to_dict(self) -> dict:
+        return {
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "altitude_m": self.altitude_m,
+            "accuracy_m": self.accuracy_m,
+            "captured_at": self.captured_at,
+            "source_file": self.source_file,
+        }
+
+    def is_valid(self) -> bool:
+        return self.latitude is not None and self.longitude is not None
+
+
+@dataclass
 class MediaPart:
     """One uploadable unit handed to the Gemini service."""
 
@@ -49,12 +77,18 @@ class MediaPart:
     mime_type: str
     bytes: bytes = b""                  # processed image bytes (JPEG) for images
     frames: list[tuple[str, bytes]] = field(default_factory=list)  # (mime, jpeg) pairs
+    spatial: Optional[SpatialMetadata] = None  # GPS/EXIF data
 
 
 @dataclass
 class MediaBundle:
     parts: list[MediaPart] = field(default_factory=list)
     log: list[dict] = field(default_factory=list)
+
+    @property
+    def spatial_manifest(self) -> dict[str, Optional[dict]]:
+        """Return {filename: SpatialMetadata.to_dict() | None} for all parts."""
+        return {part.filename: part.spatial.to_dict() if part.spatial else None for part in self.parts}
 
     def summary(self) -> str:
         return ";\n".join(
@@ -75,6 +109,89 @@ def classify_file(filename: str, content_type: str | None) -> str | None:
     if ext in VIDEO_EXTS:
         return "video"
     return None
+
+
+def _extract_exif_gps(data: bytes, filename: str) -> Optional[SpatialMetadata]:
+    """Extract GPS coordinates and timestamp from image EXIF data.
+
+    Returns None if no valid GPS data is found or on parse errors.
+    """
+    try:
+        tags = exifread.process_file(io.BytesIO(data), details=False, stop_tag="GPS GPSLatitude")
+    except Exception as exc:
+        logger.debug("EXIF parse failed for %s: %s", filename, exc)
+        return None
+
+    # Helper to convert EXIF rational to float
+    def _to_degrees(value) -> Optional[float]:
+        if not value:
+            return None
+        try:
+            # exifread returns Ratio objects for DMS (degrees, minutes, seconds)
+            d = float(value.values[0].num) / float(value.values[0].den)
+            m = float(value.values[1].num) / float(value.values[1].den)
+            s = float(value.values[2].num) / float(value.values[2].den)
+            return d + (m / 60.0) + (s / 3600.0)
+        except Exception:
+            return None
+
+    # Latitude
+    lat_ref = str(tags.get("GPS GPSLatitudeRef", "")).strip().upper()
+    lat_val = tags.get("GPS GPSLatitude")
+    lat = _to_degrees(lat_val)
+    if lat is not None and lat_ref == "S":
+        lat = -lat
+
+    # Longitude
+    lon_ref = str(tags.get("GPS GPSLongitudeRef", "")).strip().upper()
+    lon_val = tags.get("GPS GPSLongitude")
+    lon = _to_degrees(lon_val)
+    if lon is not None and lon_ref == "W":
+        lon = -lon
+
+    # Altitude
+    alt = None
+    alt_val = tags.get("GPS GPSAltitude")
+    alt_ref = str(tags.get("GPS GPSAltitudeRef", "")).strip()
+    if alt_val:
+        try:
+            alt = float(alt_val.values[0].num) / float(alt_val.values[0].den)
+            if alt_ref == "1":  # below sea level
+                alt = -alt
+        except Exception:
+            alt = None
+
+    # Accuracy (DOP) - GPS HDOP if available
+    accuracy = None
+    dop_val = tags.get("GPS GPSDOP") or tags.get("GPS GPSHPositioningError")
+    if dop_val:
+        try:
+            accuracy = float(dop_val.values[0].num) / float(dop_val.values[0].den)
+        except Exception:
+            accuracy = None
+
+    # Timestamp
+    captured_at = None
+    dt_tag = tags.get("EXIF DateTimeOriginal") or tags.get("EXIF DateTimeDigitized") or tags.get("Image DateTime")
+    if dt_tag:
+        # EXIF format: "YYYY:MM:DD HH:MM:SS"
+        try:
+            dt_str = str(dt_tag).replace(":", "-", 2)
+            captured_at = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").isoformat()
+        except Exception:
+            captured_at = None
+
+    if lat is None or lon is None:
+        return None
+
+    return SpatialMetadata(
+        latitude=lat,
+        longitude=lon,
+        altitude_m=alt,
+        accuracy_m=accuracy,
+        captured_at=captured_at,
+        source_file=filename,
+    )
 
 
 def _encode_jpeg(frame: np.ndarray) -> bytes:
@@ -181,12 +298,15 @@ def process_uploads(
 
 
 def _process_image(data: bytes, filename: str) -> MediaPart:
+    # Extract EXIF/GPS before we re-encode (original bytes needed)
+    spatial = _extract_exif_gps(data, filename)
+
     image = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("Corrupt or unsupported image (HEIC/RAW is not supported)")
     image = _downscale_image(image)
     jpeg_bytes = _encode_jpeg(image)
-    return MediaPart(kind="image", filename=filename, mime_type="image/jpeg", bytes=jpeg_bytes)
+    return MediaPart(kind="image", filename=filename, mime_type="image/jpeg", bytes=jpeg_bytes, spatial=spatial)
 
 
 def _process_video(data: bytes, filename: str, temp_dir: str, max_frames: int) -> MediaPart:
@@ -203,6 +323,7 @@ def _process_video(data: bytes, filename: str, temp_dir: str, max_frames: int) -
         filename=filename,
         mime_type="video/mp4",
         frames=[("image/jpeg", frame) for frame in frames],
+        spatial=None,
     )
 
 

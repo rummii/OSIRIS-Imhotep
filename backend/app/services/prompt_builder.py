@@ -69,7 +69,17 @@ structure, replacing every placeholder value with real content:
       "phase": "Phase 1 - Investigation & Mobilization",
       "work_description": "What happens in this phase.",
       "deliverables": ["Findings report", "Material list"],
-      "duration_days": 5
+      "duration_days": 5,
+      "depends_on": [],
+      "sequence": 1
+    },
+    {
+      "phase": "Phase 2 - Remediation Works",
+      "work_description": "Describe Phase 2 tasks.",
+      "deliverables": ["Completed remediation report"],
+      "duration_days": 10,
+      "depends_on": ["Phase 1 - Investigation & Mobilization"],
+      "sequence": 2
     }
   ],
   "cost_breakdown": {
@@ -94,7 +104,10 @@ RULES:
 - Keep the cost math consistent: subtotal = labor + materials + equipment;
   contingency = subtotal * contingency_pct / 100; total = subtotal + contingency.
 - Every array may be empty if there is genuinely no data, but prefer to include
-  real entries derived from the supplied evidence."""
+  real entries derived from the supplied evidence.
+- For scope_breakdown, include depends_on (array of phase names this phase relies on;
+  leave empty for the first phase) and sequence (1-based integer; lower = earlier).
+  Every phase after the first should list its predecessors in depends_on."""
 
 EVIDENCE_BLOCK = """EVIDENCE RULES — you may ONLY report findings explicitly stated in the
 engineer's notes or visual evidence supplied by the vision analyst. Never invent damage, inspections, or specifications.
@@ -132,6 +145,7 @@ class PromptBuilder:
         site: str = "",
         client: str = "",
         visual_evidence: str = "",
+        spatial_lines: list[str] | None = None,
     ) -> str:
         meta_lines = []
         if site:
@@ -150,9 +164,13 @@ class PromptBuilder:
             else "GEMINI VISION EVIDENCE: No media was supplied."
         )
 
+        spatial_block = ""
+        if spatial_lines:
+            spatial_block = "\n\nSPATIAL CONTEXT (from uploaded media EXIF / GPS):\n" + "\n".join(spatial_lines)
+
         header = "\n".join(meta_lines) + "\n\n" if meta_lines else ""
         return (
-            f"{header}{notes_block}\n\n{evidence_block}\n\n"
+            f"{header}{notes_block}\n\n{evidence_block}{spatial_block}\n\n"
             "Generate the SOW JSON per the OUTPUT CONTRACT. Be specific, use only "
             "the supplied evidence, and stay "
             "within the agreed severity/priority vocabulary."

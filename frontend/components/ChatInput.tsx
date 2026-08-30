@@ -1,7 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { ChevronDown, ImagePlus, Paperclip, Send, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, ImagePlus, Loader2, Mic, MicOff, Paperclip, Send, X } from "lucide-react";
+import { addPending, deletePending, getPending, type PendingSubmission } from "@/lib/offline-db";
+import { useSpeechDictation } from "@/hooks/useSpeechDictation";
+import { compressImage } from "@/lib/image-compress";
+import PendingQueueBanner from "@/components/PendingQueueBanner";
+import { useOfflineQueue, notifyQueueMutated } from "@/hooks/useOfflineQueue";
 
 export interface ChatSubmission {
   notes: string;
@@ -17,22 +22,116 @@ interface ChatInputProps {
 
 const ACCEPTED_MEDIA = "image/jpeg,image/png,image/webp,image/bmp,image/tiff,video/mp4,video/quicktime,video/x-msvideo,video/webm,video/mpeg";
 
+// ---------------------------------------------------------------------------
+// ChatInput
+// ---------------------------------------------------------------------------
+
 export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
   const [notes, setNotes] = useState("");
   const [site, setSite] = useState("");
   const [client, setClient] = useState("");
   const [showContext, setShowContext] = useState(false);
-  const [media, setMedia] = useState<{ file: File; url: string }[]>([]);
+  const [media, setMedia] = useState<{ file: File; url: string; compressing?: boolean }[]>([]);
+  /** Number of photos currently being compressed (used for UX feedback). */
+  const [compressingCount, setCompressingCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSubmittingRef = useRef(false);
 
+  // Single shared queue instance: both ChatInput (addPending) and
+  // PendingQueueBanner (display) read from the same hook so mutations
+  // in ChatInput propagate to the banner automatically.
+  const queue = useOfflineQueue();
+
+  // Auto-drain the IndexedDB queue when the browser reports it's back online.
+  useEffect(() => {
+    function handleOnline() {
+      void (async () => {
+        const items = await getPending();
+        for (const item of items) {
+          const files: File[] = [];
+          for (const mf of item.mediaFiles) {
+            try {
+              const resp = await fetch(mf.blobUrl);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              files.push(new File([await resp.blob()], mf.name, { type: mf.type }));
+            } catch { /* blob expired */ }
+          }
+          const ok = await onSubmit({ notes: item.notes, site: item.site, client: item.client, files });
+          if (ok && item.id !== undefined) await deletePending(item.id);
+        }
+        await queue.reload();
+      })();
+    }
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [onSubmit, queue]);
+
+  // Web Speech API dictation (Chrome / Edge). Hidden if unsupported.
+  const { isSupported: speechSupported, isListening, transcript, start: startDict, stop: stopDict } = useSpeechDictation();
+  useEffect(() => { if (transcript) setNotes((p) => (p ? p + " " + transcript : transcript)); }, [transcript]);
+
+  /**
+   * Add files from the <input type="file">.
+   * Image files are compressed client-side before being added to the media list,
+   * so large field photos don't eat bandwidth on cellular uploads.
+   * Non-image files (video, PDF, etc.) are added immediately without compression.
+   */
   const addFiles = useCallback((fileList: FileList | null) => {
     if (!fileList) return;
     const incoming = Array.from(fileList).slice(0, 12 - media.length);
-    setMedia((current) => [
-      ...current,
-      ...incoming.map((file) => ({ file, url: URL.createObjectURL(file) })),
-    ]);
+    if (incoming.length === 0) return;
+
+    // Separate images (compressible) from other types.
+    const images: File[] = [];
+    const nonImages: File[] = [];
+    for (const f of incoming) {
+      if (f.type.startsWith("image/")) images.push(f);
+      else nonImages.push(f);
+    }
+
+    // Non-images: add immediately.
+    if (nonImages.length > 0) {
+      setMedia((current) => [
+        ...current,
+        ...nonImages.map((file) => ({ file, url: URL.createObjectURL(file) })),
+      ]);
+    }
+
+    // Images: add with a compressing marker, then compress in background.
+    if (images.length > 0) {
+      const slots = images.map((file) => ({ file, url: "", compressing: true }));
+      setMedia((current) => [...current, ...slots]);
+      void (async () => {
+        for (let i = 0; i < images.length; i++) {
+          try {
+            const compressed = await compressImage(images[i]);
+            const newUrl = URL.createObjectURL(compressed);
+            setMedia((current) => {
+              const idx = current.findLastIndex(
+                (m) => m.file.name === images[i].name && m.compressing,
+              );
+              if (idx === -1) return current;
+              const updated = [...current];
+              if (updated[idx].url) URL.revokeObjectURL(updated[idx].url);
+              updated[idx] = { file: compressed, url: newUrl, compressing: false };
+              return updated;
+            });
+          } catch {
+            // Compression failed — keep the original file without compression.
+            setMedia((current) => {
+              const idx = current.findLastIndex(
+                (m) => m.file.name === images[i].name && m.compressing,
+              );
+              if (idx === -1) return current;
+              const updated = [...current];
+              updated[idx] = { file: images[i], url: URL.createObjectURL(images[i]), compressing: false };
+              return updated;
+            });
+          }
+        }
+      })();
+    }
+
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [media.length]);
 
@@ -56,34 +155,82 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
 
   const canSubmit = !pending && (notes.trim().length > 0 || media.length > 0);
 
+  /**
+   * Returns true when the browser is offline or when the e2e test has set
+   * window.__FORCE_OFFLINE__ to true. This allows Playwright to trigger the
+   * offline queue path without needing to mock navigator.onLine, which
+   * Chromium reads directly from the browser engine and cannot be overridden.
+   */
+  function isOffline() {
+    const flag = (globalThis as { __FORCE_OFFLINE__?: boolean }).__FORCE_OFFLINE__;
+    const onLine = (navigator as { onLine?: boolean }).onLine;
+    const result = !onLine || flag === true;
+    (globalThis as { __IS_OFFLINE__?: boolean }).__IS_OFFLINE__ = result;
+    return result;
+  }
+
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    if (isSubmittingRef.current) return;          // drop concurrent invocations (Enter + button race)
+    if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     const submission: ChatSubmission = { notes, site, client, files: media.map((m) => m.file) };
     try {
+      // Queue and clear form if the browser is offline (or e2e forces offline).
+      if (isOffline()) {
+        const mediaFiles = await Promise.all(
+          submission.files.map(async (f) => ({ name: f.name, type: f.type, size: f.size, blobUrl: URL.createObjectURL(f) })),
+        );
+        await addPending({
+          created_at: new Date().toISOString(),
+          status: "pending",
+          attempts: 0,
+          notes: submission.notes,
+          site: submission.site,
+          client: submission.client,
+          mediaFiles,
+        });
+        // Dispatch a custom event so every useOfflineQueue() instance (including
+        // PendingQueueBanner's) re-reads IndexedDB and shows the updated queue.
+        notifyQueueMutated();
+        clearAll();
+        isSubmittingRef.current = false;
+        return;
+      }
       const succeeded = await onSubmit(submission);
       if (succeeded) clearAll();
     } catch {
-      /* Preserve the draft if an unexpected client-side failure occurs. */
+      /* Preserve the draft on unexpected failures. */
     } finally {
       isSubmittingRef.current = false;
     }
   };
+
+  /** Retry a single queued submission. */
+  async function handleRetry(item: PendingSubmission) {
+    const files: File[] = [];
+    for (const mf of item.mediaFiles) {
+      try {
+        const resp = await fetch(mf.blobUrl);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        files.push(new File([await resp.blob()], mf.name, { type: mf.type }));
+      } catch { /* blob expired */ }
+    }
+    return await onSubmit({ notes: item.notes, site: item.site, client: item.client, files });
+  }
 
   return (
     <div className="relative">
       <div className="card p-3 space-y-3 shadow-sm">
         {media.length > 0 && (
           <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-3">
-            {media.map(({ file, url }, index) => (
+            {media.map(({ file, url, compressing }, index) => (
               <div key={`${file.name}-${file.size}-${index}`} className="group relative">
                 {file.type.startsWith("image/") ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={url}
                     alt={file.name}
-                    className="h-16 w-16 rounded-md border border-slate-200 object-cover"
+                    className={`h-16 w-16 rounded-md border border-slate-200 object-cover ${compressing ? "opacity-40" : ""}`}
                   />
                 ) : (
                   <video
@@ -92,6 +239,12 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
                     playsInline
                     className="h-16 w-16 rounded-md border border-slate-200 object-cover bg-slate-100"
                   />
+                )}
+                {/* Compression in-progress indicator */}
+                {compressing && (
+                  <span className="absolute inset-0 flex items-center justify-center">
+                    <Loader2 size={16} className="animate-spin text-slate-400" />
+                  </span>
                 )}
                 <span className="absolute -bottom-px left-0 right-0 truncate rounded-b-md bg-slate-900/70 px-1 py-0.5 text-[9px] text-white">
                   {file.name}
@@ -140,7 +293,37 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
             >
               <ImagePlus size={16} />
               <span>Media</span>
+              {media.some((m) => m.compressing) && (
+                <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-amber-900">
+                  {media.filter((m) => m.compressing).length}
+                </span>
+              )}
             </button>
+            {/* Dictation — only shown when browser supports SpeechRecognition */}
+            {speechSupported && (
+              <button
+                type="button"
+                onClick={isListening ? stopDict : startDict}
+                disabled={pending}
+                className={`btn-ghost justify-center sm:flex-none ${isListening ? "text-red-500 border-red-200 bg-red-50" : ""}`}
+                title={isListening ? "Stop dictation" : "Voice dictation"}
+              >
+                {isListening ? (
+                  <>
+                    <span className="relative flex h-3 w-3" aria-hidden="true">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                      <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+                    </span>
+                    <span className="text-red-600">Dictating…</span>
+                  </>
+                ) : (
+                  <>
+                    <Mic size={16} />
+                    <span>Dictate</span>
+                  </>
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleSubmit}
@@ -188,6 +371,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
           )}
         </div>
       </div>
+      <PendingQueueBanner onRetry={handleRetry} />
     </div>
   );
 }

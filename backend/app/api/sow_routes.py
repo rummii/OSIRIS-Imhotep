@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from app.config import get_settings
 from app.core.dependencies import get_current_user, require_superadmin
 from app.models.auth_models import MessageResponse
+from app.services.audit_service import AuditService
+from app.services.quota_service import QuotaError, QuotaService
 from app.services.sow_service import SowService
 
 logger = logging.getLogger("osiris.sow.routes")
@@ -18,6 +20,12 @@ router = APIRouter(prefix="/sow", tags=["sow-documents"])
 
 def _service() -> SowService:
     return SowService(get_settings())
+
+def _audit() -> AuditService:
+    return AuditService(get_settings())
+
+def _quota() -> QuotaService:
+    return QuotaService(get_settings())
 
 # -- request / response models -----------------------------------------------
 
@@ -39,6 +47,10 @@ class SowDocumentDetail(BaseModel):
     created_at: str
     updated_at: str
     is_published: bool
+    # Phase 3: structured payloads parsed server-side so the client can render
+    # the document without re-parsing the JSON content_plain itself.
+    sow: Optional[dict] = None
+    spatial_context: Optional[dict] = None
 
 class SowDocumentCreate(BaseModel):
     sow_id: Optional[int] = None
@@ -130,6 +142,8 @@ def delete_document(doc_id: int, user: dict = Depends(get_current_user)) -> Mess
     ok = service.store.delete(doc_id, owner_id)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    _audit().log("doc_delete", user=user, target_type="document",
+                 target_id=str(doc_id), outcome="success")
     return MessageResponse(detail=f"Document {doc_id} deleted.")
 
 @router.post("/from-generation", response_model=SowDocumentDetail, status_code=status.HTTP_201_CREATED)
@@ -146,16 +160,29 @@ def save_from_generation(
     documents.
     """
     service = _service()
+    # Phase 5 Track 2: enforce per-user saved-document quota.
+    q = _quota()
+    count = len(service.store.list_for_user(user["id"]))
+    try:
+        q.check_doc_count(current_doc_count=count)
+    except QuotaError as exc:
+        _audit().log("quota_exceeded", user=user, target_type="quota",
+                     target_id="doc_count", outcome="denied", detail=exc.message)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
     logger.info("save_from_generation: user_id=%s sow_keys=%s", user.get("id"), list(payload.sow.keys()))
     try:
         row = service.save_from_sow(
-        user_id=user["id"],
-        sow_dict=payload.sow,
-        sow_id=payload.sow_id,
-    )
+            user_id=user["id"],
+            sow_dict=payload.sow,
+            sow_id=payload.sow_id,
+        )
     except Exception as exc:
         logger.exception("save_from_generation failed: %s", exc)
         raise
+    _audit().log("doc_save", user=user, target_type="document",
+                 target_id=str(row["id"]), outcome="success",
+                 detail=f"from_generation sow_id={payload.sow_id}")
     return SowDocumentDetail(**SowService.to_detail(row))
 
 @router.get("/{doc_id}/markdown")
@@ -188,3 +215,122 @@ def download_docx(doc_id: int, user: dict = Depends(get_current_user)) -> Respon
         ),
         headers={"Content-Disposition": f'attachment; filename="{filename}"; filename*=UTF-8\'\'{filename}'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — multi-format export endpoint
+# ---------------------------------------------------------------------------
+from app.services.export_service import (
+    ALL_FORMATS,
+    COSTING_FORMATS,
+    DEFAULT_FILENAMES,
+    MIME_TYPES,
+    export_sow as _export_sow,
+)
+from app.config import get_settings as _get_settings
+import json as _json
+import zipfile as _zipfile
+import io as _io
+
+
+@router.get("/{doc_id}/export")
+def export_sow(
+    doc_id: int,
+    formats: str = Query(
+        "docx",
+        description=(
+            "Comma-separated list of formats. Supported: "
+            + ", ".join(ALL_FORMATS) + ". Costing formats (xlsx, csv) "
+            "require superadmin role and EXPORT_COSTING_ENABLED=true."
+        ),
+    ),
+    user: dict = Depends(get_current_user),
+) -> Response:
+    """Render a SOW in one or more formats and return as a single file or ZIP.
+
+    A single format is returned as that file directly. Multiple formats are
+    bundled into a ZIP. Costing formats (.xlsx, .csv) are gated by both the
+    caller's superadmin role and the server-side ``export_costing_enabled``
+    setting; non-superadmin callers receive a 403 if they request them.
+    """
+    requested = [f.strip().lower() for f in formats.split(",") if f.strip()]
+    if not requested:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one format is required.",
+        )
+    invalid = [f for f in requested if f not in ALL_FORMATS]
+    if invalid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported format(s): {', '.join(invalid)}. Supported: "
+                   + ", ".join(ALL_FORMATS),
+        )
+    needs_costing = any(f in COSTING_FORMATS for f in requested)
+    settings = _get_settings()
+    is_superadmin = (user or {}).get("role") == "superadmin"
+    if needs_costing and not (is_superadmin and settings.export_costing_enabled):
+        if not settings.export_costing_enabled:
+            detail = "Costing exports are disabled on this server (EXPORT_COSTING_ENABLED=false)."
+        else:
+            detail = "Costing exports (.xlsx, .csv) require superadmin privileges."
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+    service = _service()
+    row = service.assert_owner(doc_id, user)
+    content_md = row["content_md"] or ""
+    title = row["title"] or "SOW"
+    sow_dict = None
+    plain = row.get("content_plain") or ""
+    if plain:
+        try:
+            sow_dict = _json.loads(plain)
+        except Exception:
+            sow_dict = None
+    if sow_dict is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This document does not have structured JSON content; only .md is available.",
+        )
+    generated = _export_sow(sow=sow_dict, content_md=content_md, title=title, formats=requested)
+    _audit().log('doc_export', user=user, target_type='document',
+                 target_id=str(doc_id), outcome='success',
+                 detail=f'formats={','.join(sorted(generated.keys()))}')
+    if len(generated) == 1:
+        fmt, (filename, body) = next(iter(generated.items()))
+        from urllib.parse import quote as _quote
+        encoded = _quote(filename)
+        return Response(
+            content=body,
+            media_type=MIME_TYPES[fmt],
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{filename}"; '
+                    f"filename*=UTF-8''{encoded}"
+                )
+            },
+        )
+
+    # Multiple formats -> zip them
+    buf = _io.BytesIO()
+    safe_base = re.sub(r'[\\/:*?"<>|]', "-", title).strip() or "SOW"
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as z:
+        for fmt, (filename, body) in generated.items():
+            z.writestr(filename, body)
+    zip_name = f"{safe_base}-export.zip"
+    from urllib.parse import quote as _quote
+    encoded = _quote(zip_name)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{zip_name}"; '
+                f"filename*=UTF-8''{encoded}"
+            )
+        },
+    )
+
+
+# Lazily import re (used inside the route) at module bottom.
+import re  # noqa: E402

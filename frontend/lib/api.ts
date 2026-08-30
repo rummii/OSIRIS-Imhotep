@@ -1,4 +1,4 @@
-import type { GenerateResponse, SowResponse } from "./types";
+import type { ExportConfig, ExportFormat, GenerateResponse, SowResponse, SpatialManifest } from "./types";
 import { authHeaders, handleUnauthorized } from "./auth";
 
 async function parseError(res: Response): Promise<string> {
@@ -183,6 +183,10 @@ export interface SowDocumentDetail {
   created_at: string;
   updated_at: string;
   is_published: boolean;
+  /** Structured SOW parsed from sow_json; present for documents saved via /api/sow/generate. */
+  sow?: SowResponse | null;
+  /** GPS / PSGC metadata extracted from uploaded photos. */
+  spatial_context?: SpatialManifest | null;
 }
 
 /** GET /api/sow?scope=mine — list the current user's saved SOW documents. */
@@ -266,5 +270,131 @@ export async function downloadSowDocx(doc: SowDocumentListItem): Promise<void> {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+
+// ---------------------------------------------------------------------------
+// Phase 1 — RAG corpus management (superadmin only)
+// ---------------------------------------------------------------------------
+
+export interface RagSourceSummary {
+  source: string;
+  domain: string;
+  jurisdiction: string;
+  chunks: number;
+}
+
+export interface RagStatsResponse {
+  total_chunks: number;
+  sources: RagSourceSummary[];
+  last_refresh_at: string | null;
+  engine: string;
+}
+
+export interface RagIngestStats {
+  docs_seen: number;
+  chunks_embedded: number;
+  errors: string[];
+  duration_seconds: number;
+  engine: string;
+}
+
+/** GET /api/admin/rag/stats (superadmin only). */
+export async function adminRagStats(): Promise<RagStatsResponse> {
+  const res = await fetch("/api/admin/rag/stats", { headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+/** POST /api/admin/rag/refresh (superadmin only) — re-embed the full corpus. */
+export async function adminRagRefresh(): Promise<RagIngestStats> {
+  const res = await fetch("/api/admin/rag/refresh", {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+/** Phase 4: fetch multi-format SOW export from the backend. */
+export async function exportSow(
+  docId: number,
+  formats: ExportFormat[],
+  signal?: AbortSignal,
+): Promise<void> {
+  const params = new URLSearchParams({ formats: formats.join(",") });
+  const res = await fetch(`/api/sow/${docId}/export?${params}`, {
+    headers: authHeaders(),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await parseError(res);
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  // Extract filename from Content-Disposition header
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename[^;]*;\s*filename\*?[^;]*=['"]([^'"]+)['"]/i)
+    ?? disposition.match(/filename=([^;\s]+)/i);
+  const filename = match ? decodeURIComponent(match[1]) : `sow-${docId}.zip`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Phase 5 Track 2: audit log viewer
+export interface AuditLogItem {
+  id: number;
+  ts: string;
+  user_id: number | null;
+  username: string | null;
+  role: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  outcome: string;
+  detail: string | null;
+  ip_address: string | null;
+}
+
+export interface AuditLogResponse {
+  items: AuditLogItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function adminListAuditLog(
+  params: { user_id?: number; action?: string; limit?: number; offset?: number } = {},
+): Promise<AuditLogResponse> {
+  const search = new URLSearchParams();
+  if (params.user_id !== undefined) search.set("user_id", String(params.user_id));
+  if (params.action) search.set("action", params.action);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  const res = await fetch(`/api/admin/audit-log?${search}`, { headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function adminLogout(): Promise<void> {
+  const res = await fetch("/api/auth/logout", { method: "POST", headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+/** GET /api/admin/config — feature-gate flags (superadmin only). */
+export async function fetchExportConfig(): Promise<ExportConfig> {
+  const res = await fetch(`/api/admin/config`, { headers: authHeaders() });
+  if (handleUnauthorized(res)) throw new Error("Session expired");
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
 }
 

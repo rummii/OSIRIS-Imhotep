@@ -80,6 +80,11 @@ SOW_SCHEMA: dict[str, Any] = {
                         "items": {"type": "STRING"},
                     },
                     "duration_days": {"type": "INTEGER"},
+                    "depends_on": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                    },
+                    "sequence": {"type": "INTEGER"},
                 },
                 "required": ["phase", "work_description"],
             },
@@ -143,6 +148,9 @@ class ScopeItem(BaseModel):
     work_description: str = ""
     deliverables: list[str] = Field(default_factory=list)
     duration_days: int | None = 0
+    # Phase 4: WBS fields
+    depends_on: list[str] = Field(default_factory=list)   # names of phases this phase depends on
+    sequence: int = 0                                     # explicit sort order; lower = earlier
 
 class CostBreakdown(BaseModel):
     currency: str = "PHP"
@@ -186,6 +194,8 @@ class GenerateResponse(BaseModel):
     grounding_sources: list[GroundingSource] = Field(default_factory=list)
     context_provider: str = "null"
     generated_at: str = ""
+    document_id: Optional[int] = None
+    spatial_context: Optional["SpatialManifest"] = None  # Phase 2: GPS/EXIF per uploaded file
     document_id: Optional[int] = None
 
 # ---------------------------------------------------------------------------
@@ -256,3 +266,101 @@ def coerce_sow_payload(data: dict[str, Any]) -> SowResponse:
     }
     return SowResponse.model_validate(sow_data)
 
+
+# ---------------------------------------------------------------------------
+# Phase 1 — RAG ingest stats & status
+# ---------------------------------------------------------------------------
+
+class SourceSummary(BaseModel):
+    source: str
+    domain: str
+    jurisdiction: str
+    chunks: int
+
+
+class RagStatsResponse(BaseModel):
+    total_chunks: int
+    sources: list[SourceSummary] = Field(default_factory=list)
+    last_refresh_at: Optional[str] = None
+    engine: str = "unknown"
+
+
+class IngestStats(BaseModel):
+    docs_seen: int = 0
+    chunks_embedded: int = 0
+    errors: list[str] = Field(default_factory=list)
+    duration_seconds: float = 0.0
+    engine: str = "unknown"
+
+
+class RagRefreshRequest(BaseModel):
+    """Reserved for future selective refresh payloads (e.g. by source or domain)."""
+    source: Optional[str] = None
+    domain: Optional[str] = None
+
+
+
+class ExportConfigResponse(BaseModel):
+    """Feature-gate config surfaced to the frontend.
+
+    Returned by ``GET /api/admin/config`` (superadmin only). The frontend
+    uses these flags to hide or disable export options whose server-side
+    counterparts would 403 anyway.
+    """
+
+    export_costing_enabled: bool
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — GPS/EXIF spatial context
+# ---------------------------------------------------------------------------
+
+class SpatialContext(BaseModel):
+    """GPS/EXIF spatial metadata for one uploaded file."""
+    latitude: Optional[float] = None        # decimal degrees (WGS84)
+    longitude: Optional[float] = None
+    altitude_m: Optional[float] = None     # meters above WGS84 ellipsoid
+    accuracy_m: Optional[float] = None     # horizontal accuracy in meters
+    captured_at: Optional[str] = None       # ISO 8601 timestamp from EXIF
+    source_file: str = ''
+    # Phase 3: reverse-geocoded administrative location
+    site_location: Optional["SiteLocation"] = None
+
+    def location_string(self) -> str:
+        '''Return a human-readable location label.'''
+        if self.site_location is not None and (self.site_location.barangay or self.site_location.municipality):
+            parts = [p for p in [
+                self.site_location.barangay,
+                self.site_location.municipality,
+                self.site_location.province,
+                self.site_location.region,
+            ] if p]
+            return ", ".join(parts)
+        if self.latitude is not None and self.longitude is not None:
+            lat_dir = 'N' if self.latitude >= 0 else 'S'
+            lon_dir = 'E' if self.longitude >= 0 else 'W'
+            alt_str = f', {self.altitude_m:.1f} m above sea level' if self.altitude_m is not None else ''
+            return (
+                f'{abs(self.latitude):.5f} deg {lat_dir}, '
+                f'{abs(self.longitude):.5f} deg {lon_dir}{alt_str}'
+            )
+        return 'No GPS data'
+
+
+class SiteLocation(BaseModel):
+    """Reverse-geocoded administrative location (PSGC hierarchy for the Philippines)."""
+    barangay: Optional[str] = None
+    municipality: Optional[str] = None     # city/municipality
+    province: Optional[str] = None
+    region: Optional[str] = None
+    country: Optional[str] = None
+    raw_address: Optional[str] = None      # full formatted address from the geocoder
+
+    def compact(self) -> str:
+        """Return a comma-joined PSGC label, dropping None parts."""
+        return ", ".join(p for p in [self.barangay, self.municipality, self.province] if p) or "Unknown location"
+
+
+class SpatialManifest(BaseModel):
+    '''Mapping of filename -> spatial metadata (null if no GPS data).'''
+    files: dict[str, Optional[SpatialContext]] = Field(default_factory=dict)

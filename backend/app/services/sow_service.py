@@ -79,9 +79,20 @@ class SowStore:
                     is_published  INTEGER NOT NULL DEFAULT 0,
                     created_at    TEXT NOT NULL,
                     updated_at    TEXT NOT NULL,
+                    spatial_context TEXT,
+                    sow_json      TEXT,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )"""
             )
+            # Idempotent migration for existing tables pre-Phase 3.
+            for stmt in (
+                "ALTER TABLE sow_documents ADD COLUMN spatial_context TEXT",
+                "ALTER TABLE sow_documents ADD COLUMN sow_json TEXT",
+            ):
+                try:
+                    conn.execute(stmt)
+                except Exception:
+                    pass  # column already exists
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sow_user ON sow_documents(user_id)")
             conn.commit()
         finally:
@@ -101,9 +112,20 @@ class SowStore:
                     content_plain TEXT NOT NULL,
                     is_published  INTEGER NOT NULL DEFAULT 0,
                     created_at    TEXT NOT NULL,
-                    updated_at    TEXT NOT NULL
+                    updated_at    TEXT NOT NULL,
+                    spatial_context TEXT,
+                    sow_json      TEXT
                 )"""
             )
+            # Idempotent migration for already-existing tables.
+            for stmt in (
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS spatial_context TEXT",
+                "ALTER TABLE sow_documents ADD COLUMN IF NOT EXISTS sow_json TEXT",
+            ):
+                try:
+                    cur.execute(stmt)
+                except Exception:
+                    pass
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sow_user ON sow_documents(user_id)")
             conn.commit()
         finally:
@@ -125,6 +147,8 @@ class SowStore:
         content_plain: str,
         sow_id: int | None = None,
         is_published: bool = False,
+        spatial_context: str | None = None,
+        sow_json: str | None = None,
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         if self.is_postgres:
@@ -133,11 +157,12 @@ class SowStore:
                 cur = conn.cursor()
                 cur.execute(
                     """INSERT INTO sow_documents
-                       (user_id, sow_id, title, content_md, content_plain, is_published, created_at, updated_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       (user_id, sow_id, title, content_md, content_plain, is_published,
+                        created_at, updated_at, spatial_context, sow_json)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        RETURNING *""",
                     (user_id, sow_id, title, content_md, content_plain,
-                     1 if is_published else 0, now, now),
+                     1 if is_published else 0, now, now, spatial_context, sow_json),
                 )
                 row = cur.fetchone()
                 conn.commit()
@@ -151,10 +176,11 @@ class SowStore:
                 cur = conn.cursor()
                 cur.execute(
                     "INSERT INTO sow_documents "
-                    "(user_id, sow_id, title, content_md, content_plain, is_published, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(user_id, sow_id, title, content_md, content_plain, is_published, "
+                    "created_at, updated_at, spatial_context, sow_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (user_id, sow_id, title, content_md, content_plain,
-                     1 if is_published else 0, now, now),
+                     1 if is_published else 0, now, now, spatial_context, sow_json),
                 )
                 doc_id = cur.lastrowid
                 conn.commit()
@@ -400,6 +426,19 @@ class SowService:
                 except (TypeError, ValueError):
                     return None
 
+        def _to_json(value: Any) -> dict | None:
+            """Best-effort JSON decode. The ``spatial_context`` column may be
+            either a string (SQLite / JSONB-as-text) or already a dict (PG JSONB)."""
+            if value is None or value == "":
+                return None
+            if isinstance(value, dict):
+                return value
+            try:
+                import json as _json
+                return _json.loads(value)
+            except (TypeError, ValueError):
+                return None
+
         return {
             "id": _to_int(row["id"]),
             "user_id": _to_int(row["user_id"]),
@@ -410,6 +449,8 @@ class SowService:
             "created_at": _to_str(row.get("created_at")),
             "updated_at": _to_str(row.get("updated_at")),
             "is_published": bool(row.get("is_published")),
+            "sow": _to_json(row.get("sow_json")),
+            "spatial_context": _to_json(row.get("spatial_context")),
         }
 
 
@@ -418,6 +459,7 @@ class SowService:
         user_id: int,
         sow_dict: dict[str, Any],
         sow_id: int | None = None,
+        spatial_context: str | None = None,
     ) -> dict[str, Any]:
         # Tolerant validation: strip unknown fields and coerce missing ones to defaults.
         # The frontend sends the raw SowResponse JSON (no validation), and the
@@ -435,6 +477,9 @@ class SowService:
         content_md = _sow_to_markdown(sow)
         content_plain = _sow_to_plaintext(sow)
         title = str(sow.project_title or "Untitled Scope of Work")
+        # Persist the structured JSON so /sow/{id} can return it without re-parsing.
+        import json as _json
+        sow_json = _json.dumps(sow.model_dump(mode="json"))
         try:
             row = self.store.create(
                 user_id=user_id,
@@ -443,6 +488,8 @@ class SowService:
                 content_plain=content_plain,
                 sow_id=sow_id,
                 is_published=False,
+                spatial_context=spatial_context,
+                sow_json=sow_json,
             )
         except Exception as exc:
             from fastapi import HTTPException, status
@@ -544,117 +591,7 @@ def _sow_to_plaintext(sow: SowResponse) -> str:
 
 
 # ---------------------------------------------------------------------------
-# .docx export (works everywhere, no Google account required)
+# .docx export — re-exported from export_service (backward compat)
 # ---------------------------------------------------------------------------
 
-def export_to_docx(content_md: str, title: str) -> bytes:
-    """Build a valid .docx from the stored SOW Markdown.
-
-    Google service accounts cannot create Docs/Drive files in standalone
-    (non-Workspace) projects, so this is the always-working export path:
-    the user downloads the file and can open it anywhere (Word, LibreOffice)
-    or upload it to their own Google Drive to get a Google Doc.
-    """
-    import re
-    import io
-    import zipfile
-
-    def esc(text: str) -> str:
-        return (
-            text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace('"', "&quot;")
-        )
-
-    def run(text: str) -> str:
-        # Inline **bold** support.
-        text = esc(text)
-        out: list[str] = []
-        for i, chunk in enumerate(re.split(r"\*\*(.+?)\*\*", text)):
-            if i % 2 == 1:
-                out.append(f"<w:r><w:rPr><w:b/></w:rPr><w:t>{chunk}</w:t></w:r>")
-            elif chunk:
-                out.append(f"<w:r><w:t>{chunk}</w:t></w:r>")
-        return "".join(out)
-
-    body: list[str] = [f'<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>{esc(title)}</w:t></w:r></w:p>']
-
-    rows: list[list[str]] = []
-    for line in content_md.splitlines():
-        line = line.rstrip()
-        if not line.strip():
-            continue
-        if line.startswith("|"):
-            cells = [c.strip().lstrip("**").rstrip("**") for c in line.strip().strip("|").split("|")]
-            if all(set(c) <= set("-: ") for c in cells):
-                continue  # separator row
-            rows.append(cells)
-            continue
-        if line.startswith("###"):
-            body.append(f'<w:p><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t>{esc(line[3:].strip())}</w:t></w:r></w:p>')
-        elif line.startswith("##"):
-            body.append(f'<w:p><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>{esc(line[2:].strip())}</w:t></w:r></w:p>')
-        elif line.startswith("#"):
-            body.append(f'<w:p><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>{esc(line[1:].strip())}</w:t></w:r></w:p>')
-        elif line.startswith("- "):
-            body.append(f'<w:p><w:r><w:t>• {run(line[2:].strip())}</w:t></w:r></w:p>')
-        else:
-            body.append(f"<w:p>{run(line)}</w:p>")
-
-    if rows:
-        body.append("<w:p/>")
-        grid = "".join(f'<w:gridCol w:w="{int(6200 / len(rows[0]))}"/>' for _ in rows[0])
-        body.append("<w:tbl><w:tblGrid>" + grid + "</w:tblGrid>")
-        for ri, row in enumerate(rows):
-            body.append("<w:tr>")
-            for cell in row:
-                bold = "<w:rPr><w:b/></w:rPr>" if ri == 0 else ""
-                body.append(
-                    f'<w:tc><w:tcPr><w:tcW w:w="{int(6200 / len(rows[0]))}" w:type="dxa"/></w:tcPr>'
-                    f"<w:p><w:r>{bold}<w:t>{esc(cell)}</w:t></w:r></w:p></w:tc>"
-                )
-            body.append("</w:tr>")
-        body.append("</w:tbl>")
-    body.append("<w:p/>")
-
-    document_xml = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        "<w:body>"
-        + "".join(body)
-        + '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>'
-        "</w:body></w:document>"
-    )
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("[Content_Types].xml", (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-            '<Default Extension="xml" ContentType="application/xml"/>'
-            '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-            '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
-            "</Types>"))
-        z.writestr("_rels/.rels", (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
-            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="word/styles.xml"/>'
-            "</Relationships>"))
-        z.writestr("word/_rels/document.xml.rels", (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-            "</Relationships>"))
-        z.writestr("word/styles.xml", (
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-            '<w:style w:type="paragraph" w:default="1" w:styleId="Normal">'
-            '<w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="22"/></w:rPr>'
-            "</w:style></w:styles>"))
-        z.writestr("word/document.xml", document_xml)
-    return buf.getvalue()
-
-
+from app.services.export_service import export_to_docx
