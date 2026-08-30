@@ -1,6 +1,7 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",   // produces .next/standalone/ — used by frontend/Dockerfile
+  output: "standalone",   // produces .next/standalone/
+  productionBrowserSourceMaps: true,  // enables Chrome DevTools source maps in production — used by frontend/Dockerfile
   reactStrictMode: true,
   async rewrites() {
     // Proxy /api/* to the FastAPI backend so the browser only ever talks to

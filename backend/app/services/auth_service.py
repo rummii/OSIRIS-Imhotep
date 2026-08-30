@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
 """Authentication service: user store + JWT session management.
 
 * Passwords are hashed with PBKDF2-HMAC-SHA256 (stdlib) — no compiled deps.

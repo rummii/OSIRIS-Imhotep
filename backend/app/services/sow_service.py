@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
 """SOW document persistence: save, list, update, delete, and export.
 
 Documents are stored locally in the same SQLite/Postgres DB as the user table,

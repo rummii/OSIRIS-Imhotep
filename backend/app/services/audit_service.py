@@ -1,4 +1,4 @@
-﻿"""Audit logging - append-only record of security-sensitive events.
+"""Audit logging - append-only record of security-sensitive events.
 
 The table lives in the same SQLite/Postgres DB as the user store so that the
 entire audit trail is a single file that can be copied/shipped for compliance.
@@ -127,26 +127,27 @@ class AuditStore:
         finally:
             conn.close()
 
+    def _ph(self) -> str:
+        """Parameter placeholder for the active dialect."""
+        return "%s" if self.is_postgres else "?"
+
     def insert(self, *, ts: str, user_id: Optional[int], username: Optional[str],
                role: Optional[str], action: str, target_type: Optional[str],
                target_id: Optional[str], outcome: str, detail: Optional[str],
                ip_address: Optional[str]) -> None:
         try:
-            if self.is_postgres:
-                conn = self._pg_conn()
-            else:
-                conn = self._connect()
+            conn = self._pg_conn() if self.is_postgres else self._connect()
             try:
                 cur = conn.cursor()
+                ph = self._ph()
                 cur.execute(
-                    """INSERT INTO audit_log
+                    f"""INSERT INTO audit_log
                         (ts, user_id, username, role, action, target_type,
                          target_id, outcome, detail, ip_address)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph},{ph})""",
                     (ts, user_id, username, role, action,
                      target_type, target_id, outcome, detail, ip_address),
                 )
-                conn.commit()
             finally:
                 conn.close()
         except Exception:
@@ -155,22 +156,22 @@ class AuditStore:
     def list(self, *, user_id: Optional[int] = None, action: Optional[str] = None,
              since: Optional[str] = None, until: Optional[str] = None,
              limit: int = 200, offset: int = 0) -> list:
+        ph = self._ph()
         conditions = []
         params = []
         if user_id is not None:
-            conditions.append("user_id = ?")
+            conditions.append(f"user_id = {ph}")
             params.append(user_id)
         if action is not None:
-            conditions.append("action = ?")
+            conditions.append(f"action = {ph}")
             params.append(action)
         if since is not None:
-            conditions.append("ts >= ?")
+            conditions.append(f"ts >= {ph}")
             params.append(since)
         if until is not None:
-            conditions.append("ts <= ?")
+            conditions.append(f"ts <= {ph}")
             params.append(until)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-        params.extend([limit, offset])
         if self.is_postgres:
             conn = self._pg_conn()
         else:
@@ -181,7 +182,7 @@ class AuditStore:
                 f"""SELECT id, ts, user_id, username, role, action,
                            target_type, target_id, outcome, detail, ip_address
                       FROM audit_log {where}
-                      ORDER BY ts DESC LIMIT ? OFFSET ?""",
+                      ORDER BY ts DESC LIMIT {limit} OFFSET {offset}""",
                 params,
             )
             if self.is_postgres:
@@ -192,13 +193,14 @@ class AuditStore:
             conn.close()
 
     def count(self, *, user_id: Optional[int] = None, action: Optional[str] = None) -> int:
+        ph = self._ph()
         conditions = []
         params = []
         if user_id is not None:
-            conditions.append("user_id = ?")
+            conditions.append(f"user_id = {ph}")
             params.append(user_id)
         if action is not None:
-            conditions.append("action = ?")
+            conditions.append(f"action = {ph}")
             params.append(action)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         if self.is_postgres:

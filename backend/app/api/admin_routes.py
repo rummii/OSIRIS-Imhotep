@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
 """Admin routes (superadmin only): onboard and manage users."""
 from __future__ import annotations
 

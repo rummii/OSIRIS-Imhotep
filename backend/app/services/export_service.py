@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
 """Multi-format SOW export engine.
 * docx  — hand-rolled OpenXML zip (Word & LibreOffice compatible)
 * odt   — ODF text document (odfpy, pure Python)

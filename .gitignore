@@ -18,6 +18,12 @@ credentials/
 backend/credentials/
 *.pem
 *service-account*.json
+# ...but commit config JSONs needed for tooling
+!pyrightconfig.json
+!tsconfig.json
+!package.json
+!package-lock.json
+!.vscode/launch.json
 
 # OS / editor
 .DS_Store

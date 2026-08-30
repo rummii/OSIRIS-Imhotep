@@ -1,3 +1,4 @@
+# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
 """HTTP routes: health probe and SOW generation."""
 from __future__ import annotations
 

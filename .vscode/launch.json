@@ -1,0 +1,10 @@
+{
+  "version": "0.2.0",
+  "configurations": [{
+    "type": "chrome",
+    "request": "launch",
+    "name": "OSIRIS - 35.187.242.177",
+    "url": "http://35.187.242.177",
+    "webRoot": "${workspaceFolder}/frontend"
+  }]
+}

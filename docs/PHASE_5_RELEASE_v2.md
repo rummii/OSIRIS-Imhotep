@@ -118,7 +118,7 @@ Recommended `DATABASE_URL` privileges: a dedicated role with `CREATE TABLE` on t
 
 Run these in order. Mark each item ✓ before declaring the release live.
 
-- [ ] `curl http://<host>:8000/api/sow/health` returns `200 {"ok": true}`.
+- [ ] `curl http://<host>:8000/api/health` returns `200 {"ok": true}`.
 - [ ] Log in as superadmin, navigate to `/admin`, and confirm the **Audit Log** card renders with at least one row (the `login` event for the current superadmin session).
 - [ ] Log in as a standard user with valid credentials; confirm a `login` row with `outcome=success` and that user's `username` appears in the audit stream within ~10 s.
 - [ ] Attempt a denied export (standard user → `.xlsx` or `.csv` costing format). Confirm `403` and a `costing_export` row with `outcome=denied` in the admin audit log.
