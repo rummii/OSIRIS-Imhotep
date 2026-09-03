@@ -1,0 +1,19 @@
+{
+  "name": "OSIRIS Imhotep",
+  "short_name": "OSIRIS",
+  "description": "AI-assisted engineering Scope of Work generator for field engineers.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "business", "utilities"]
+}

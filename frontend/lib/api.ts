@@ -258,7 +258,15 @@ export async function deleteSowDocument(id: number): Promise<void> {
 
 /** GET /api/sow/:id/download-docx — download the SOW as a .docx file. */
 export async function downloadSowDocx(doc: SowDocumentListItem): Promise<void> {
-  const res = await fetch(`/api/sow/${doc.id}/download-docx`, { headers: authHeaders() });
+  let res: Response;
+  try {
+    res = await fetch(`/api/sow/${doc.id}/download-docx`, { headers: authHeaders() });
+  } catch (networkErr) {
+    // fetch() throws on DNS, CORS, TCP, TLS, or abort failures. The browser
+    // logs these as "Fetch failed" — surface a clearer message to the caller.
+    console.error("downloadSowDocx network error:", networkErr);
+    throw new Error("Could not reach the server. Check your connection and try again.");
+  }
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   const blob = await res.blob();
@@ -299,17 +307,17 @@ export interface RagIngestStats {
   engine: string;
 }
 
-/** GET /api/admin/rag/stats (superadmin only). */
+/** GET /api/admin/users/rag/stats (superadmin only). */
 export async function adminRagStats(): Promise<RagStatsResponse> {
-  const res = await fetch("/api/admin/rag/stats", { headers: authHeaders() });
+  const res = await fetch("/api/admin/users/rag/stats", { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
-/** POST /api/admin/rag/refresh (superadmin only) — re-embed the full corpus. */
+/** POST /api/admin/users/rag/refresh (superadmin only) — re-embed the full corpus. */
 export async function adminRagRefresh(): Promise<RagIngestStats> {
-  const res = await fetch("/api/admin/rag/refresh", {
+  const res = await fetch("/api/admin/users/rag/refresh", {
     method: "POST",
     headers: authHeaders(),
   });
