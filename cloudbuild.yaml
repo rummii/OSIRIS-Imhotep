@@ -9,9 +9,9 @@ steps:
       - "build"
       - "--no-cache"
       - "-t"
-      - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
       - "-t"
-      - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:latest"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:latest"
       - "-f"
       - "Dockerfile.backend"
       - "."
@@ -21,9 +21,9 @@ steps:
     args:
       - "build"
       - "-t"
-      - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:${_TAG}"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:${_TAG}"
       - "-t"
-      - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:latest"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest"
       - "--build-arg"
       - "BACKEND_URL=${_BACKEND_URL}"
       - "--build-arg"
@@ -34,11 +34,27 @@ steps:
       - "frontend/Dockerfile"
       - "."
 
+  # Backend → Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-backend"
+    args:
+      - "push"
+      - "--all-tags"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep"
+
+  # Frontend → Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-frontend"
+    args:
+      - "push"
+      - "--all-tags"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend"
+
 images:
-  - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
-  - "europe-west1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:latest"
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:${_TAG}"
-  - "us-central1-docker.pkg.dev/$PROJECT_ID/osiris/frontend:latest"
+  - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
+  - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:latest"
+  - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:${_TAG}"
+  - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest"
 
 options:
   machineType: "E2_HIGHCPU_8"
