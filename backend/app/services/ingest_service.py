@@ -149,10 +149,18 @@ class IngestService:
         stats.docs_seen = len(corpus)
         stats.engine = self._store.stats().get("engine", "unknown")
 
-        # Build a flat list of (chunk_text, source, domain, jurisdiction, citation, chunk_index)
+        # Build a flat list of (chunk_text, source, domain, jurisdiction, citation, chunk_index).
+        # Deduplicate by (source, chunk_index) so repeated corpus entries that share a source
+        # (e.g. multiple pd-1096 docs) do not collide on the sqlite-vec vectors rowid
+        # (which equals documents.id) and cause UNIQUE constraint failures during upsert.
         flat: list[dict] = []
+        seen_keys: set[tuple[str, int]] = set()
         for doc in corpus:
             for idx, piece in enumerate(chunk_text(doc["text"])):
+                key = (doc["source"], idx)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
                 flat.append(
                     {
                         "text": piece,
