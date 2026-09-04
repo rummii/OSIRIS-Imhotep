@@ -61,7 +61,7 @@ jobs:
             --region=${{ env.FRONTEND_REGION }} \
             --image=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/osiris/frontend:$(git rev-parse --short HEAD) \
             --allow-unauthenticated \
-            --set-env-vars=BACKEND_URL=https://osiris-imhotep-gcrwj2qr2a-ew.a.run.app
+            --set-env-vars=BACKEND_URL=https://osiris-imhotep-3fu6t5a3hq-df.a.run.app
 
       - name: Smoke test backend
         run: |

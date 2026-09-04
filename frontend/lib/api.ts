@@ -1,6 +1,27 @@
 import type { ExportConfig, ExportFormat, GenerateResponse, SowResponse, SpatialManifest } from "./types";
 import { authHeaders, handleUnauthorized } from "./auth";
 
+/**
+ * Resolve the absolute URL for an API call.
+ *
+ * If `NEXT_PUBLIC_BACKEND_URL` is set at build time (production deploy), the
+ * frontend calls the FastAPI backend directly. This guarantees the browser
+ * never silently routes through a stale Next.js `/api/*` proxy to a dead
+ * backend.
+ *
+ * When `NEXT_PUBLIC_BACKEND_URL` is empty (local dev with `next dev`), the
+ * function returns the path unchanged so the existing `next.config.js`
+ * `rewrites()` proxy (or the dev server) handles the request.
+ */
+const BACKEND_BASE: string =
+  (process.env.NEXT_PUBLIC_BACKEND_URL ?? "").replace(/\/+$/, "");
+
+export function apiUrl(path: string): string {
+  if (!BACKEND_BASE) return path;
+  // `path` is expected to start with "/api/"; if not, normalise.
+  return `${BACKEND_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
 async function parseError(res: Response): Promise<string> {
   let detail = `Request failed (${res.status})`;
   try {
@@ -29,7 +50,7 @@ export interface LoginResult {
 
 /** POST /api/auth/login — returns a JWT to store. */
 export async function login(username: string, password: string): Promise<LoginResult> {
-  const res = await fetch("/api/auth/login", {
+  const res = await fetch(apiUrl("/api/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -40,7 +61,7 @@ export async function login(username: string, password: string): Promise<LoginRe
 
 /** GET /api/auth/me — current session user (401 clears session). */
 export async function fetchMe(): Promise<Record<string, unknown>> {
-  const res = await fetch("/api/auth/me", { headers: authHeaders() });
+  const res = await fetch(apiUrl("/api/auth/me"), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -48,7 +69,7 @@ export async function fetchMe(): Promise<Record<string, unknown>> {
 
 /** POST /api/auth/change-password */
 export async function changePassword(current: string, next: string): Promise<void> {
-  const res = await fetch("/api/auth/change-password", {
+  const res = await fetch(apiUrl("/api/auth/change-password"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ current_password: current, new_password: next }),
@@ -59,7 +80,7 @@ export async function changePassword(current: string, next: string): Promise<voi
 
 /** GET /api/admin/users (superadmin only) */
 export async function adminListUsers(): Promise<Record<string, unknown>[]> {
-  const res = await fetch("/api/admin/users", { headers: authHeaders() });
+  const res = await fetch(apiUrl("/api/admin/users"), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -74,7 +95,7 @@ export async function adminCreateUser(data: {
   password: string;
   must_change_password?: boolean;
 }): Promise<Record<string, unknown>> {
-  const res = await fetch("/api/admin/users", {
+  const res = await fetch(apiUrl("/api/admin/users"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
@@ -89,7 +110,7 @@ export async function adminUpdateUser(
   id: number,
   data: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(`/api/admin/users/${id}`, {
+  const res = await fetch(apiUrl(`/api/admin/users/${id}`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
@@ -101,7 +122,7 @@ export async function adminUpdateUser(
 
 /** POST /api/admin/users/:id/reset-password (superadmin only) */
 export async function adminResetPassword(id: number, newPassword: string): Promise<void> {
-  const res = await fetch(`/api/admin/users/${id}/reset-password`, {
+  const res = await fetch(apiUrl(`/api/admin/users/${id}/reset-password`), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ new_password: newPassword }),
@@ -137,7 +158,7 @@ export async function generateSow(params: GenerateParams): Promise<GenerateRespo
     form.append("files", file);
   }
 
-  const res = await fetch("/api/sow/generate", {
+  const res = await fetch(apiUrl("/api/sow/generate"), {
     method: "POST",
     body: form,
     headers: authHeaders(),
@@ -157,7 +178,7 @@ export async function saveFromGeneration(
   sowId?: number | null,
   isPublished = false,
 ): Promise<SowDocumentDetail> {
-  const res = await fetch("/api/sow/from-generation", {
+  const res = await fetch(apiUrl("/api/sow/from-generation"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ sow, sow_id: sowId, is_published: isPublished }),
@@ -200,7 +221,7 @@ export interface SowDocumentDetail {
 export async function listSowDocuments(
   scope: "mine" | "all" = "mine"
 ): Promise<SowDocumentListItem[]> {
-  const res = await fetch(`/api/sow?scope=${scope}`, { headers: authHeaders() });
+  const res = await fetch(apiUrl(`/api/sow?scope=${scope}`), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   const data = await res.json();
@@ -209,7 +230,7 @@ export async function listSowDocuments(
 
 /** GET /api/sow/:id — fetch a single saved SOW document (owner or superadmin). */
 export async function getSowDocument(id: number): Promise<SowDocumentDetail> {
-  const res = await fetch(`/api/sow/${id}`, { headers: authHeaders() });
+  const res = await fetch(apiUrl(`/api/sow/${id}`), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -223,7 +244,7 @@ export async function createSowDocument(data: {
   sow_id?: number | null;
   is_published?: boolean;
 }): Promise<SowDocumentDetail> {
-  const res = await fetch("/api/sow", {
+  const res = await fetch(apiUrl("/api/sow"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
@@ -243,7 +264,7 @@ export async function updateSowDocument(
     is_published?: boolean;
   }
 ): Promise<SowDocumentDetail> {
-  const res = await fetch(`/api/sow/${id}`, {
+  const res = await fetch(apiUrl(`/api/sow/${id}`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
@@ -255,7 +276,7 @@ export async function updateSowDocument(
 
 /** DELETE /api/sow/:id — permanently remove a saved document. */
 export async function deleteSowDocument(id: number): Promise<void> {
-  const res = await fetch(`/api/sow/${id}`, {
+  const res = await fetch(apiUrl(`/api/sow/${id}`), {
     method: "DELETE",
     headers: authHeaders(),
   });
@@ -267,7 +288,7 @@ export async function deleteSowDocument(id: number): Promise<void> {
 export async function downloadSowDocx(doc: SowDocumentListItem): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`/api/sow/${doc.id}/download-docx`, { headers: authHeaders() });
+    res = await fetch(apiUrl(`/api/sow/${doc.id}/download-docx`), { headers: authHeaders() });
   } catch (networkErr) {
     // fetch() throws on DNS, CORS, TCP, TLS, or abort failures. The browser
     // logs these as "Fetch failed" — surface a clearer message to the caller.
@@ -316,7 +337,7 @@ export interface RagIngestStats {
 
 /** GET /api/admin/rag/stats (superadmin only). */
 export async function adminRagStats(): Promise<RagStatsResponse> {
-  const res = await fetch("/api/admin/rag/stats", { headers: authHeaders() });
+  const res = await fetch(apiUrl("/api/admin/rag/stats"), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
@@ -324,7 +345,7 @@ export async function adminRagStats(): Promise<RagStatsResponse> {
 
 /** POST /api/admin/rag/refresh (superadmin only) — re-embed the full corpus. */
 export async function adminRagRefresh(): Promise<RagIngestStats> {
-  const res = await fetch("/api/admin/rag/refresh", {
+  const res = await fetch(apiUrl("/api/admin/rag/refresh"), {
     method: "POST",
     headers: authHeaders(),
   });
@@ -339,7 +360,7 @@ export async function exportSow(
   signal?: AbortSignal,
 ): Promise<void> {
   const params = new URLSearchParams({ formats: formats.join(",") });
-  const res = await fetch(`/api/sow/${docId}/export?${params}`, {
+  const res = await fetch(apiUrl(`/api/sow/${docId}/export?${params}`), {
     headers: authHeaders(),
     signal,
   });
@@ -393,21 +414,21 @@ export async function adminListAuditLog(
   if (params.action) search.set("action", params.action);
   if (params.limit !== undefined) search.set("limit", String(params.limit));
   if (params.offset !== undefined) search.set("offset", String(params.offset));
-  const res = await fetch(`/api/admin/audit-log?${search}`, { headers: authHeaders() });
+  const res = await fetch(apiUrl(`/api/admin/audit-log?${search}`), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
 export async function adminLogout(): Promise<void> {
-  const res = await fetch("/api/auth/logout", { method: "POST", headers: authHeaders() });
+  const res = await fetch(apiUrl("/api/auth/logout"), { method: "POST", headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
 }
 
 /** GET /api/admin/config — feature-gate flags (superadmin only). */
 export async function fetchExportConfig(): Promise<ExportConfig> {
-  const res = await fetch(`/api/admin/config`, { headers: authHeaders() });
+  const res = await fetch(apiUrl(`/api/admin/config`), { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();

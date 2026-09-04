@@ -8,6 +8,7 @@ import { compressImage } from "@/lib/image-compress";
 import PendingQueueBanner from "@/components/PendingQueueBanner";
 import { useOfflineQueue, notifyQueueMutated } from "@/hooks/useOfflineQueue";
 import { COMPLIANCE_PROFILES, type ComplianceProfile } from "@/lib/types";
+import { apiUrl } from "@/lib/api";
 
 export interface ChatSubmission {
   notes: string;
@@ -414,7 +415,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
                         try {
                           const fd = new FormData();
                           fd.append("file", entry.file);
-                          const res = await fetch("/api/sop/upload", { method: "POST", body: fd });
+                          const res = await fetch(apiUrl("/api/sop/upload"), { method: "POST", body: fd });
                           if (!res.ok) throw new Error(`HTTP ${res.status}`);
                           const data = (await res.json()) as { ok: boolean; source: string; chunks_added: number };
                           setSopFiles((prev) =>
