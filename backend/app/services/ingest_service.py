@@ -142,6 +142,11 @@ class IngestService:
         keyed on ``(source, chunk_index)``.  Returns aggregate stats.
         """
         self._ensure_ready()
+        # Wipe the vectors table before a full refresh so that stale vec0 rowids
+        # from previous runs (e.g. due to duplicate corpus entries or partial
+        # refreshes that left orphaned rowid assignments) cannot collide with the
+        # new inserts driven by ``upsert_chunks``.
+        self._store.clear_vectors()
         stats = IngestStats()
         started = time.monotonic()
 

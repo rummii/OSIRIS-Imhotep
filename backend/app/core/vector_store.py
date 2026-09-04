@@ -289,6 +289,22 @@ class VectorStore:
         finally:
             conn.close()
 
+    def clear_vectors(self) -> None:
+        """Delete all rows from the vectors table.
+
+        Idempotent — safe to call before a full refresh so that stale vec0 rowids
+        from previous partial runs do not cause UNIQUE constraint violations when
+        ``upsert_chunks`` re-inserts with ``rowid = doc_id``.
+        """
+        conn = self._connect()
+        try:
+            if self._use_numpy:
+                self._numpy_vectors.clear()
+            conn.execute("DELETE FROM vectors")
+            conn.commit()
+        finally:
+            conn.close()
+
     def stats(self) -> dict:
         conn = self._connect()
         try:
