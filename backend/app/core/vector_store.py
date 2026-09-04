@@ -184,9 +184,12 @@ class VectorStore:
                         (doc_id, _pack(embedding)),
                     )
                 else:
+                    # sqlite-vec virtual table: embed the float list as a JSON
+                    # string so the vec_f32() SQL function can parse it.
+                    import json as _json
                     conn.execute(
-                        "INSERT OR REPLACE INTO vectors (rowid, embedding) VALUES (?, ?)",
-                        (doc_id, embedding),
+                        "INSERT OR REPLACE INTO vectors (rowid, embedding) VALUES (?, vec_f32(?))",
+                        (doc_id, _json.dumps(embedding)),
                     )
                 conn.commit()
                 count += 1
