@@ -63,16 +63,22 @@ class VectorStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # sqlite-vec must be loaded on every connection — extensions are
+        # per-connection in SQLite, not per-database.
+        if not self._use_numpy:
+            try:
+                conn.enable_load_extension(True)
+                import sqlite_vec
+                sqlite_vec.load(conn)
+                conn.enable_load_extension(False)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Failed to load sqlite-vec on new connection: %s", exc)
         return conn
 
     def _init(self) -> None:
         try:
             conn = self._connect()
-            conn.enable_load_extension(True)
-            import sqlite_vec
-            sqlite_vec.load(conn)
             conn.execute("SELECT vec_f32('[1.0, 2.0, 3.0]')")
-            conn.enable_load_extension(False)
             conn.close()
             self._init_vec_schema()
             logger.info("sqlite-vec extension loaded; using ANN index.")
