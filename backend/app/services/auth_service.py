@@ -31,11 +31,12 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent.parent  # backend/
 
 # pg8000 server-side prepared statements can be deallocated (statement_timeout,
 # max_prepared_statements eviction, or session reset). When that happens, the
-# client-side cache holds a stale name and the next execute() raises
-#   "DatabaseError: unnamed prepared statement does not exist" (SQLSTATE 26000)
-# on a perfectly healthy connection. We detect that specific error, drop the
-# connection, and retry once on a fresh one.
-_PG_STMT_EVICTED = "26000"  # SQLSTATE for "invalid SQL statement name"
+# client-side cache holds a stale name and the next execute() raises one of:
+#   26000 "unnamed prepared statement does not exist"
+#   08P01 "bind message supplies N parameters, but prepared statement '' requires M"
+# on a perfectly healthy connection. We detect either, force the service to
+# re-open its connection, and retry once.
+_PG_STMT_STALE = frozenset({"26000", "08P01"})
 
 
 def _pg_retry(fn):
@@ -43,6 +44,10 @@ def _pg_retry(fn):
 
     Only applies to the PostgreSQL (pg8000) backend. SQLite calls pass through
     unchanged because SQLite has no client-side prepared-statement cache.
+
+    Each method in AuthStore / AuditStore opens a fresh connection on the
+    PostgreSQL path via ``self._pg_conn()`` on every call, so the retry is
+    inherently a fresh connection. SQLite opens via ``self._connect()``.
     """
     import functools
 
@@ -62,10 +67,10 @@ def _pg_retry(fn):
                 first = exc.args[0]
                 if isinstance(first, dict):
                     sqlstate = first.get("C", "") or ""
-            if sqlstate != _PG_STMT_EVICTED:
+            if sqlstate not in _PG_STMT_STALE:
                 raise
             logger.warning(
-                "pg8000 prepared statement evicted (SQLSTATE 26000); retrying on fresh connection"
+                "pg8000 prepared statement cache stale (SQLSTATE %s); retrying", sqlstate
             )
             return fn(self, *args, **kwargs)
 
