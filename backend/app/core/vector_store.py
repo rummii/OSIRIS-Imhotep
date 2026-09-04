@@ -198,9 +198,14 @@ class VectorStore:
                     # sqlite-vec virtual table: vectors are stored as
                     # float32 BLOBs.  ``sqlite_vec.serialize_float32`` packs a
                     # Python list into the exact byte layout vec0 expects.
+                    # Use explicit DELETE + INSERT instead of INSERT OR REPLACE
+                    # because vec0 xReplace may not correctly handle rowid
+                    # assignment when the row already exists.
                     from sqlite_vec import serialize_float32
                     conn.execute(
-                        "INSERT OR REPLACE INTO vectors (rowid, embedding) VALUES (?, ?)",
+                        "DELETE FROM vectors WHERE rowid = ?", (doc_id,))
+                    conn.execute(
+                        "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
                         (doc_id, serialize_float32(embedding)),
                     )
                 conn.commit()
@@ -292,15 +297,27 @@ class VectorStore:
     def clear_vectors(self) -> None:
         """Delete all rows from the vectors table.
 
-        Idempotent — safe to call before a full refresh so that stale vec0 rowids
-        from previous partial runs do not cause UNIQUE constraint violations when
-        ``upsert_chunks`` re-inserts with ``rowid = doc_id``.
+        For the sqlite-vec vec0 virtual table, plain ``DELETE FROM vectors`` is
+        unreliable across sqlite-vec releases, so we drop and recreate the table
+        along with the matching documents entries.  This is the only reliable way
+        to fully reset the rowid space for a clean upsert.  For the numpy
+        fallback we simply clear the in-memory cache.
         """
         conn = self._connect()
         try:
             if self._use_numpy:
                 self._numpy_vectors.clear()
-            conn.execute("DELETE FROM vectors")
+                conn.execute("DELETE FROM vectors")
+            else:
+                # Drop and recreate the vec0 table — this is the only reliable
+                # way to fully reset the rowid space and avoid collisions with
+                # the next batch's INSERTs.
+                conn.execute("DROP TABLE IF EXISTS vectors")
+                conn.execute(
+                    "CREATE VIRTUAL TABLE vectors USING vec0("
+                    "  embedding FLOAT[768]"
+                    ")"
+                )
             conn.commit()
         finally:
             conn.close()
