@@ -1,10 +1,27 @@
 {
   "version": "0.2.0",
-  "configurations": [{
-    "type": "chrome",
-    "request": "launch",
-    "name": "OSIRIS - 35.187.242.177",
-    "url": "http://35.187.242.177",
-    "webRoot": "${workspaceFolder}/frontend"
-  }]
+  "configurations": [
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "OSIRIS - 35.187.242.177 (fresh window)",
+      "url": "http://35.187.242.177",
+      "webRoot": "${workspaceFolder}/frontend",
+      "sourceMaps": true,
+      "sourceMapPathOverrides": {
+        "/_next/*": "${workspaceFolder}/frontend/.next/*"
+      }
+    },
+    {
+      "type": "chrome",
+      "request": "attach",
+      "name": "OSIRIS - attach to existing Chrome",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/frontend",
+      "sourceMaps": true,
+      "sourceMapPathOverrides": {
+        "/_next/*": "${workspaceFolder}/frontend/.next/*"
+      }
+    }
+  ]
 }

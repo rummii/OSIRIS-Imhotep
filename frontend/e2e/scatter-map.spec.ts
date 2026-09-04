@@ -96,18 +96,6 @@ test.describe("ScatterMap — home page flow", () => {
         body: JSON.stringify(STUB_SOW_RESPONSE),
       });
     });
-    // Stub the auto-save endpoint (called by saveFromGeneration).
-    await context.route("**/api/sow/documents", async (route) => {
-      if (route.request().method() === "POST") {
-        route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ id: 1, title: "HVAC Rooftop Overhaul" }),
-        });
-      } else {
-        route.fallback();
-      }
-    });
 
     await login(page);
     await page.locator("textarea").fill("Inspect the HVAC rooftop unit at Facility B and replace the compressor.");
@@ -152,17 +140,6 @@ test.describe("ScatterMap — home page flow", () => {
 
     await context.route("**/api/sow/generate", async (route) => {
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(withGps) });
-    });
-    await context.route("**/api/sow/documents", async (route) => {
-      if (route.request().method() === "POST") {
-        route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ id: 1, title: "HVAC Rooftop Overhaul" }),
-        });
-      } else {
-        route.fallback();
-      }
     });
 
     await login(page);

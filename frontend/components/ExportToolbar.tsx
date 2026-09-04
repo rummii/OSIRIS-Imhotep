@@ -20,8 +20,9 @@ interface ExportToolbarProps {
  *
  * Renders one button per supported format. Costing formats (Excel, CSV) are
  * locked behind the superadmin role — the lock icon surfaces a tooltip.
- * The Markdown and JSON "Copy" buttons use navigator.clipboard and never
- * hit the network.
+ * The Markdown and JSON "Copy" buttons use navigator.clipboard (with a
+ * fallback to document.execCommand for non-secure contexts) and never hit
+ * the network.
  */
 export function ExportToolbar({ sow, userRole, exportCostingEnabled = false }: ExportToolbarProps) {
   const [pending, setPending] = useState<ExportFormat | null>(null);
@@ -57,7 +58,22 @@ export function ExportToolbar({ sow, userRole, exportCostingEnabled = false }: E
       const text = target === "md"
         ? (sow.content_md ?? "")
         : (sow.content_plain ?? JSON.stringify(sow, null, 2));
-      await navigator.clipboard.writeText(text);
+      // navigator.clipboard is only available in a secure context (HTTPS or
+      // localhost).  Fall back to a hidden-textarea + execCommand("copy")
+      // so the buttons still work when the app is served over plain HTTP
+      // (e.g. http://35.187.242.177 on a bare IP).
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const el = document.createElement("textarea");
+        el.value = text;
+        el.style.cssText = "position:fixed;top:-9999px;left:-9999px";
+        document.body.appendChild(el);
+        el.focus();
+        el.select();
+        document.execCommand("copy");
+        document.body.removeChild(el);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Copy failed");
     } finally {
@@ -67,7 +83,7 @@ export function ExportToolbar({ sow, userRole, exportCostingEnabled = false }: E
 
   // Costing formats are hidden entirely when the server-side gate is
   // closed.  Non-costing formats are always available.
-  const allFormats: ExportFormat[] = ["docx", "odt", "xlsx", "csv", "xml"];
+  const allFormats: ExportFormat[] = ["docx", "odt", "xlsx", "csv", "xml", "geojson"];
   const formats = allFormats.filter(
     (fmt) => costingEnabled || !EXPORT_FORMATS[fmt].requiresSuperadmin,
   );

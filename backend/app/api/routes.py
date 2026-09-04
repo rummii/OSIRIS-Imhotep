@@ -77,14 +77,27 @@ def generate_sow(
     notes: str = Form(""),
     site: str = Form(""),
     client: str = Form(""),
+    compliance_profile: str = Form("general"),
+    sop_sources: str = Form(""),
     files: list[UploadFile] = File(default=[]),
     current_user: dict = Depends(get_current_user),  # login gate + document owner
 ) -> GenerateResponse:
-    """Accept engineer notes + media (images / short clips) and produce a SOW."""
+    """Accept engineer notes + media (images / short clips) and produce a SOW.
+
+    Args:
+        compliance_profile: One of ``"general"`` (default), ``"dpwh"``, ``"dole"``,
+            ``"philgeps"``.  When set, the prompt builder injects a compliance
+            rules block that biases the LLM toward the selected regulatory /
+            standards framework.
+        sop_sources: Comma-separated list of SOP/KB source IDs previously uploaded
+            via ``POST /api/sop/upload``.  When provided, those chunks are added
+            to the RAG context for this generation only.
+    """
     settings = get_settings()
     notes = notes or ""
     site = site or ""
     client = client or ""
+    sop_source_ids = [s.strip() for s in sop_sources.split(",") if s.strip()]
 
     # Phase 5 Track 2: per-request upload quota (smaller of legacy 50MB
     # and the operator-configured quota).  Enforce before any I/O.
@@ -136,6 +149,16 @@ def generate_sow(
         logger.exception("Context retrieval failed; continuing without context.")
         context_docs = []
 
+    # Phase 3: augment context with SOP/KB chunks for the selected source IDs.
+    if sop_source_ids:
+        try:
+            sop_chunks = context_provider.retrieve_by_sources(sop_source_ids)
+            if sop_chunks:
+                context_docs = context_docs + sop_chunks
+                logger.info("SOP/KB chunks added: %d from sources=%s", len(sop_chunks), sop_source_ids)
+        except Exception:
+            logger.exception("SOP/KB retrieval failed; continuing without SOP context.")
+
     # 2b. Phase 2+3: Extract spatial context from media EXIF/GPS data,
     #     reverse-geocode each unique coordinate, and surface it in the prompt.
     spatial_files: dict[str, SpatialContext] = {}
@@ -178,13 +201,17 @@ def generate_sow(
 
     # 3. Build prompts ----------------------------------------------------------
     builder = PromptBuilder()
-    system_prompt = builder.build_system_prompt(context_docs)
+    system_prompt = builder.build_system_prompt(
+        context_docs,
+        compliance_profile=compliance_profile,
+    )
     user_prompt = builder.build_user_prompt(
         notes=notes,
         site=site,
         client=client,
         visual_evidence=visual_evidence,
         spatial_lines=spatial_lines or None,
+        sop_sources=sop_source_ids,
     )
 
     # 4. DeepSeek text analysis -----------------------------------------------------

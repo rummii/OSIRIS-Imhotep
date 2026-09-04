@@ -201,12 +201,46 @@ def download_docx(doc_id: int, user: dict = Depends(get_current_user)) -> Respon
     works: the file can be opened in Word/LibreOffice or uploaded to a
     personal Google Drive to get a native Google Doc.
     """
+    import json as _json
     from urllib.parse import quote
-    from app.services.sow_service import export_to_docx
+    from app.services.export_service import export_to_docx
     service = _service()
     row = service.assert_owner(doc_id, user)
-    filename = quote((row["title"] or "SOW").replace("/", "-")) + ".docx"
-    content = export_to_docx(row["content_md"], row["title"] or "Scope of Work")
+
+    # content_plain stores the SowResponse as JSON; sow_json is a Phase 3
+    # duplicate used by /sow/{id} detail responses. Prefer content_plain,
+    # fall back to sow_json. Markdown (content_md) is NOT a valid SowResponse
+    # and would crash Pydantic validation -> 500.
+    plain = row.get("content_plain") or row.get("sow_json") or ""
+    if not plain:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "This document has no structured JSON content and cannot be "
+                "exported as .docx. Regenerate it via POST /api/sow/generate."
+            ),
+        )
+    try:
+        sow_dict = _json.loads(plain)
+    except _json.JSONDecodeError as exc:
+        logger.exception("download_docx: invalid JSON for doc_id=%s", doc_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Document content is corrupted (invalid JSON): {exc}",
+        )
+
+    title = row["title"] or "Scope of Work"
+    filename = quote(title.replace("/", "-")) + ".docx"
+    try:
+        content = export_to_docx(sow_dict, title)
+    except Exception as exc:
+        # Make the real cause visible in the backend log instead of a silent 500.
+        logger.exception("download_docx: export_to_docx failed for doc_id=%s", doc_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to build .docx: {exc}",
+        )
+
     return Response(
         content=content,
         media_type=(

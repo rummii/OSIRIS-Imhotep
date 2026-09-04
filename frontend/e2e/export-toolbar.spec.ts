@@ -91,3 +91,64 @@ test.describe("ExportToolbar — UI", () => {
     await expect(page.locator("h1")).toContainText("My Documents");
   });
 });
+
+test.describe("ExportToolbar — copy buttons", () => {
+  /**
+   * Regression test for the bug where `navigator.clipboard.writeText(...)`
+   * threw `TypeError: Cannot read properties of undefined (reading 'writeText')`
+   * on plain-HTTP deployments (e.g. http://35.187.242.177) because the
+   * Clipboard API is only available in secure contexts.  The component now
+   * falls back to a hidden-textarea + document.execCommand("copy") when
+   * `window.isSecureContext` is false.
+   */
+
+  test("Copy Markdown works in a secure context (navigator.clipboard path)", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await login(page, "testuser", "testpassword");
+    await page.goto("/documents/1");
+
+    // Click the Copy Markdown button.  It must not throw.
+    const copyMd = page.getByRole("button", { name: /Copy Markdown/i });
+    if (await copyMd.count()) {
+      await copyMd.first().click();
+      // The spinner state should clear and the button re-enable (no error).
+      await expect(copyMd.first()).toBeEnabled({ timeout: 5000 });
+      await expect(page.getByRole("alert")).toHaveCount(0);
+    }
+  });
+
+  test("Copy JSON falls back to execCommand when not in a secure context", async ({
+    page,
+    context,
+  }) => {
+    // Simulate a non-secure context BEFORE any page script runs.
+    await context.addInitScript(() => {
+      Object.defineProperty(window, "isSecureContext", {
+        configurable: true,
+        get: () => false,
+      });
+      // Wipe any pre-existing clipboard API so the fallback path is exercised.
+      try {
+        // @ts-ignore - intentional hostile override
+        delete (navigator as any).clipboard;
+      } catch {
+        // ignore
+      }
+    });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+
+    await login(page, "testuser", "testpassword");
+    await page.goto("/documents/1");
+
+    const copyJson = page.getByRole("button", { name: /Copy JSON/i });
+    if (await copyJson.count()) {
+      await copyJson.first().click();
+      // The execCommand fallback must complete without an error alert.
+      await expect(copyJson.first()).toBeEnabled({ timeout: 5000 });
+      await expect(page.getByRole("alert")).toHaveCount(0);
+    }
+  });
+});

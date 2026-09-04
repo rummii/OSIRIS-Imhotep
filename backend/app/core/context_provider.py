@@ -36,6 +36,16 @@ class ContextProvider(ABC):
         is a short manifest of the uploaded media (filenames, frame counts).
         """
 
+    def retrieve_by_sources(
+        self, source_ids: list[str]
+    ) -> list[ContextDocument]:
+        """Return all chunks belonging to the given source IDs.
+
+        Optional: providers that don't have a fixed corpus (e.g. external HTTP
+        endpoints) can fall through to ``[]`` by not overriding this.
+        """
+        return []
+
     def __str__(self) -> str:  # pragma: no cover - trivial
         return self.name
 
@@ -63,5 +73,14 @@ class ChainContextProvider(ContextProvider):
             try:
                 docs.extend(provider.retrieve(notes, media_summary))
             except Exception:  # never let a context failure kill the request
+                continue
+        return docs
+
+    def retrieve_by_sources(self, source_ids: list[str]) -> list[ContextDocument]:
+        docs: list[ContextDocument] = []
+        for provider in self.providers:
+            try:
+                docs.extend(provider.retrieve_by_sources(source_ids))
+            except Exception:
                 continue
         return docs

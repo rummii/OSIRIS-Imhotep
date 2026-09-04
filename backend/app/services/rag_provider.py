@@ -169,6 +169,37 @@ class SqliteVecRagContextProvider(ContextProvider):
             )
         return docs
 
+    def retrieve_by_sources(
+        self, source_ids: list[str]
+    ) -> list[ContextDocument]:
+        """Retrieve all chunks belonging to the given SOP/KB source IDs.
+
+        Used by the SOP/KB upload feature to surface a document's own chunks
+        as supplemental context during SOW generation.
+        """
+        if not source_ids or self._store is None:
+            return []
+        rows = self._store.get_by_sources(source_ids)
+        docs: list[ContextDocument] = []
+        for row in rows:
+            citation = row.get("citation", "")
+            content = row.get("chunk_text", "")
+            if citation:
+                content = f"[{citation}] {content}"
+            docs.append(
+                ContextDocument(
+                    source=row.get("source", "unknown"),
+                    content=content,
+                    metadata={
+                        "domain": row.get("domain", ""),
+                        "jurisdiction": row.get("jurisdiction", ""),
+                        "citation": citation,
+                        "similarity": 1.0,
+                    },
+                )
+            )
+        return docs
+
 
 def get_context_provider(settings: Settings) -> ContextProvider:
     """Build the configured context provider chain.

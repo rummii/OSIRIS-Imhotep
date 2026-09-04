@@ -1,11 +1,12 @@
-# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
+﻿# pyright: reportOptionalSubscript=false, reportOptionalMemberAccess=false
 """Multi-format SOW export engine.
-* docx  — hand-rolled OpenXML zip (Word & LibreOffice compatible)
-* odt   — ODF text document (odfpy, pure Python)
-* xlsx  — Excel workbook (openpyxl, pure Python)
-* csv   — UTF-8 cost breakdown CSV
-* xml   — MS Project-compatible WBS XML with PredecessorLink nodes
-* md    — pass-through of stored Markdown
+* docx    — hand-rolled OpenXML zip (Word & LibreOffice compatible)
+* odt     — ODF text document (odfpy, pure Python)
+* xlsx    — Excel workbook (openpyxl, pure Python)
+* csv     — UTF-8 cost breakdown CSV
+* xml     — MS Project-compatible WBS XML with PredecessorLink nodes
+* md      — pass-through of stored Markdown
+* geojson — GeoJSON FeatureCollection for GIS import
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from xml.etree import ElementTree as ET
 from app.models.schemas import SowResponse
 
 COSTING_FORMATS = frozenset({"xlsx", "csv"})
-ALL_FORMATS = ("md", "docx", "odt", "xlsx", "csv", "xml")
+ALL_FORMATS = ("md", "docx", "odt", "xlsx", "csv", "xml", "geojson")
 MIME_TYPES = {
     "md": "text/markdown; charset=utf-8",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -28,6 +29,7 @@ MIME_TYPES = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "csv": "text/csv; charset=utf-8",
     "xml": "application/xml; charset=utf-8",
+    "geojson": "application/geo+json; charset=utf-8",
 }
 DEFAULT_FILENAMES = {
     "md": "{title}.md",
@@ -36,12 +38,19 @@ DEFAULT_FILENAMES = {
     "xlsx": "{title}-cost-breakdown.xlsx",
     "csv": "{title}-cost-breakdown.csv",
     "xml": "{title}-gantt.xml",
+    "geojson": "{title}-spatial-features.geojson",
 }
 
 
 def _coerce_sow(sow):
     if isinstance(sow, SowResponse):
         return sow
+    if isinstance(sow, dict) and isinstance(sow.get("data"), str):
+        import json as _json
+        try:
+            sow = dict(sow, data=_json.loads(sow["data"]))
+        except (TypeError, ValueError):
+            pass
     return SowResponse.model_validate(sow)
 
 
@@ -460,6 +469,58 @@ def export_to_markdown(content_md):
 
 
 # ---------------------------------------------------------------------------
+# GeoJSON — spatial features for GIS import
+# ---------------------------------------------------------------------------
+
+def export_to_geojson(sow) -> bytes:
+    """Generate a GeoJSON FeatureCollection from SOW visual findings with spatial metadata."""
+    import json as _json
+    from app.models.schemas import SpatialContext
+
+    features = []
+    spatial_manifest = getattr(sow, "spatial_context", None)
+    if spatial_manifest:
+        files = getattr(spatial_manifest, "files", {}) or {}
+        for filename, ctx_dict in files.items():
+            if not ctx_dict:
+                continue
+            ctx = SpatialContext(**ctx_dict)
+            if not ctx.is_valid():
+                continue
+            # Try to find matching visual finding description
+            vf_id = None
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                        ctx.longitude,
+                        ctx.latitude,
+                        ctx.altitude_m if ctx.altitude_m is not None else 0.0,
+                    ],
+                },
+                "properties": {
+                    "source_file": filename,
+                    "captured_at": ctx.captured_at,
+                    "accuracy_m": ctx.accuracy_m,
+                },
+            }
+            # Try to find matching visual finding
+            for vf in (sow.visual_findings or []):
+                if vf.description and (filename.lower() in vf.description.lower()):
+                    feature["properties"]["description"] = vf.description
+                    feature["properties"]["asset"] = getattr(vf, "asset", filename)
+                    feature["properties"]["severity"] = getattr(vf, "severity", "")
+                    break
+            else:
+                feature["properties"]["description"] = f"Geotagged photo: {filename}"
+                feature["properties"]["asset"] = filename
+            features.append(feature)
+
+    feature_collection = {"type": "FeatureCollection", "features": features}
+    return _json.dumps(feature_collection, indent=2).encode("utf-8")
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -481,6 +542,8 @@ def export_sow(sow, content_md, title, formats):
             out[fmt] = (DEFAULT_FILENAMES["csv"].format(title=safe), export_to_csv(sow, title))
         elif fmt == "xml":
             out[fmt] = (DEFAULT_FILENAMES["xml"].format(title=safe), export_to_gantt_xml(sow, title))
+        elif fmt == "geojson":
+            out[fmt] = (DEFAULT_FILENAMES["geojson"].format(title=safe), export_to_geojson(sow))
         else:
             raise ValueError(f"Unsupported export format: {fmt!r}")
     return out

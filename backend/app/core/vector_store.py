@@ -69,8 +69,9 @@ class VectorStore:
         try:
             conn = self._connect()
             conn.enable_load_extension(True)
-            conn.execute("SELECT load_extension('vec0')")
-            conn.execute("SELECT vec0()")
+            import sqlite_vec
+            sqlite_vec.load(conn)
+            conn.execute("SELECT vec_f32('[1.0, 2.0, 3.0]')")
             conn.enable_load_extension(False)
             conn.close()
             self._init_vec_schema()
@@ -241,6 +242,35 @@ class VectorStore:
                 sql += "\nORDER BY distance ASC\nLIMIT ?"
                 params.append(k)
                 return [dict(r) for r in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
+    def get_by_sources(
+        self,
+        source_ids: list[str],
+    ) -> list[dict]:
+        """Return all chunks for the given source IDs, ordered by chunk_index."""
+        if not source_ids:
+            return []
+        conn = self._connect()
+        try:
+            placeholders = ",".join("?" * len(source_ids))
+            sql = (
+                f"SELECT source, domain, jurisdiction, citation, chunk_text, chunk_index "
+                f"FROM documents WHERE source IN ({placeholders}) "
+                f"ORDER BY source, chunk_index"
+            )
+            return [
+                {
+                    "source": r["source"],
+                    "domain": r["domain"],
+                    "jurisdiction": r["jurisdiction"],
+                    "citation": r["citation"],
+                    "chunk_text": r["chunk_text"],
+                    "similarity": 1.0,
+                }
+                for r in conn.execute(sql, list(source_ids)).fetchall()
+            ]
         finally:
             conn.close()
 

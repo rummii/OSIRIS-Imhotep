@@ -148,6 +148,7 @@ class AuditStore:
                     (ts, user_id, username, role, action,
                      target_type, target_id, outcome, detail, ip_address),
                 )
+                conn.commit()
             finally:
                 conn.close()
         except Exception:

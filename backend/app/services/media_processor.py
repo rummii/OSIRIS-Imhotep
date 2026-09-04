@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -309,6 +310,41 @@ def _process_image(data: bytes, filename: str) -> MediaPart:
     return MediaPart(kind="image", filename=filename, mime_type="image/jpeg", bytes=jpeg_bytes, spatial=spatial)
 
 
+def _extract_video_gps(data: bytes, filename: str) -> Optional[SpatialMetadata]:
+    """Extract GPS coordinates from video container metadata (MP4/QuickTime).
+    
+    Approach: sample the first video frame and extract EXIF GPS data from it.
+    Falls back gracefully if no GPS data is available or on parse errors.
+    """
+    import struct
+    temp_path = os.path.join(tempfile.gettempdir(), f"temp_gps_{uuid.uuid4().hex}_{filename}.mp4")
+    try:
+        with open(temp_path, "wb") as f:
+            f.write(data)
+        # Use OpenCV to grab first frame
+        cap = cv2.VideoCapture(temp_path)
+        if not cap.isOpened():
+            return None
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            return None
+        # Save first frame as JPEG in memory
+        _, jpeg_buf = cv2.imencode(".jpg", frame)
+        frame_bytes = jpeg_buf.tobytes()
+        # Extract EXIF GPS from this frame
+        return _extract_exif_gps(frame_bytes, filename)
+    except Exception as exc:
+        logger.debug("Video GPS extraction failed for %s: %s", filename, exc)
+        return None
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
 def _process_video(data: bytes, filename: str, temp_dir: str, max_frames: int) -> MediaPart:
     tmp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{filename}")
     try:
@@ -318,12 +354,14 @@ def _process_video(data: bytes, filename: str, temp_dir: str, max_frames: int) -
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+    # Extract GPS from video metadata
+    spatial = _extract_video_gps(data, filename)
     return MediaPart(
         kind="video",
         filename=filename,
         mime_type="video/mp4",
         frames=[("image/jpeg", frame) for frame in frames],
-        spatial=None,
+        spatial=spatial,
     )
 
 

@@ -114,6 +114,9 @@ export interface GenerateParams {
   notes: string;
   site: string;
   client: string;
+  complianceProfile: "general" | "dpwh" | "dole" | "philgeps";
+  /** Source IDs of SOP/KB documents to bias the SOW generation toward. */
+  sopSources?: string[];
   files: File[];
 }
 
@@ -126,6 +129,10 @@ export async function generateSow(params: GenerateParams): Promise<GenerateRespo
   form.append("notes", params.notes);
   form.append("site", params.site);
   form.append("client", params.client);
+  form.append("compliance_profile", params.complianceProfile);
+  if (params.sopSources && params.sopSources.length > 0) {
+    form.append("sop_sources", params.sopSources.join(","));
+  }
   for (const file of params.files) {
     form.append("files", file);
   }

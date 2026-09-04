@@ -137,7 +137,23 @@ export interface AttachedMedia {
   previewUrl: string;
 }
 
-export type ExportFormat = "docx" | "odt" | "xlsx" | "csv" | "xml" | "md" | "json";
+export type ExportFormat = "docx" | "odt" | "xlsx" | "csv" | "xml" | "md" | "json" | "geojson";
+
+/**
+ * Phase 3: compliance profile toggles for SOW generation.
+ *
+ * Each profile biases the LLM to emphasize the matching regulatory / standards
+ * framework when drafting the SOW.  "general" (default) produces a neutral
+ * SOW with no specific compliance focus.
+ */
+export type ComplianceProfile = "general" | "dpwh" | "dole" | "philgeps";
+
+export const COMPLIANCE_PROFILES: Record<ComplianceProfile, { label: string; description: string }> = {
+  general: { label: "General SOW",        description: "No specific compliance focus" },
+  dpwh:    { label: "DPWH Infrastructure", description: "DPWH Standard Specifications, RA 9184 procurement" },
+  dole:    { label: "DOLE OSH Compliance", description: "RA 11058, DOLE D.O. 13 — construction safety & PPE" },
+  philgeps:{ label: "PhilGEPS / Costing",  description: "PhilGEPS reference rates, government procurement" },
+};
 
 export interface ExportFormatMeta {
   label: string;
@@ -154,4 +170,5 @@ export const EXPORT_FORMATS: Record<ExportFormat, ExportFormatMeta> = {
   xml:  { label: "MS Project",   ext: ".xml",  mime: "application/xml; charset=utf-8",                                       requiresSuperadmin: false },
   md:   { label: "Markdown",     ext: ".md",   mime: "text/markdown; charset=utf-8",                                         requiresSuperadmin: false },
   json: { label: "JSON",         ext: ".json", mime: "application/json",                                                       requiresSuperadmin: false },
+  geojson: { label: "GeoJSON",   ext: ".geojson", mime: "application/geo+json; charset=utf-8",                                 requiresSuperadmin: false },
 };

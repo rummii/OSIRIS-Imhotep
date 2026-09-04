@@ -20,6 +20,40 @@ from app.core.context_provider import ContextDocument
 # Static prompt fragments
 # ---------------------------------------------------------------------------
 
+COMPLIANCE_BLOCKS: dict[str, str] = {
+    "dpwh": (
+        "COMPLIANCE PROFILE: DPWH Infrastructure\n"
+        "When producing the SOW, apply these DPWH standards and procurement rules:\n"
+        "- Follow DPWH Standard Specifications for Public Works, latest edition.\n"
+        "- Reference DPWH standard items of work and their corresponding unit costs.\n"
+        "- SOW deliverables must align with DPWH procurement threshold and contract packaging "
+        "requirements under RA 9184 (Government Procurement Reform Act).\n"
+        "- Include a Bill of Quantities (BOQ) using DPWH standard items.\n"
+        "- Cite applicable DPWH design standards and guidelines."
+    ),
+    "dole": (
+        "COMPLIANCE PROFILE: DOLE Occupational Safety and Health\n"
+        "When producing the SOW, apply these DOLE/OSH requirements:\n"
+        "- Comply with RA 11058 (Occupational Safety and Health Standards Act) and its IRR.\n"
+        "- Require a Construction Safety and Health (CSH) officer for projects with 50+ workers.\n"
+        "- Specify mandatory PPE per DOLE D.O. No. 13: hard hat, safety boots, high-visibility vest, "
+        "fall protection above 1.8 m, and respiratory protection for dust-generating work.\n"
+        "- Include a site-specific Safety and Health Program (SSHP).\n"
+        "- Mandate toolbox meetings, accident/incident register, and 24-hour DOLE reporting for serious injuries.\n"
+        "- Reference applicable DOLE occupational exposure limits and hazard communication standards."
+    ),
+    "philgeps": (
+        "COMPLIANCE PROFILE: PhilGEPS / Government Procurement\n"
+        "When producing the SOW, apply these procurement and costing standards:\n"
+        "- Use PhilGEPS reference rates for labor, materials, and equipment where available.\n"
+        "- Structure the cost breakdown consistent with RA 9184 (Government Procurement Reform Act).\n"
+        "- Include ABC (Approved Budget for the Contract), abstract of bids, and procurement method rationale.\n"
+        "- Reference DTI SRP for construction materials and PhilGEPS posting requirements.\n"
+        "- For infrastructure, align scope phases with standard procurement milestones.\n"
+        "- Cite applicable PhilGEPS categories and CPES (Contractor's Performance Evaluation System) ratings."
+    ),
+}
+
 ROLE_BLOCK = """You are OSIRIS, a senior licensed facilities engineering consultant.
 You produce professional, client-ready Scope of Work (SOW) documents from
 engineer field notes about civil, structural, MEP, and industrial assets."""
@@ -127,8 +161,14 @@ class PromptBuilder:
     def build_system_prompt(
         self,
         context_docs: list[ContextDocument] | None = None,
+        compliance_profile: str = "general",
     ) -> str:
         parts: list[str] = [ROLE_BLOCK, OUTPUT_CONTRACT]
+
+        # Phase 3: inject compliance rules when a non-general profile is selected.
+        if compliance_profile in COMPLIANCE_BLOCKS:
+            parts.append(COMPLIANCE_BLOCKS[compliance_profile])
+
         parts.append(EVIDENCE_BLOCK)
 
         if context_docs:
@@ -146,6 +186,7 @@ class PromptBuilder:
         client: str = "",
         visual_evidence: str = "",
         spatial_lines: list[str] | None = None,
+        sop_sources: list[str] | None = None,
     ) -> str:
         meta_lines = []
         if site:
@@ -164,13 +205,22 @@ class PromptBuilder:
             else "GEMINI VISION EVIDENCE: No media was supplied."
         )
 
+        sop_block = ""
+        if sop_sources:
+            sop_block = (
+                f"\n\nSOP / KNOWLEDGE BASE: The following documents were provided "
+                f"by the client as reference: {', '.join(sop_sources)}. "
+                "Incorporate relevant requirements, methods, and acceptance criteria "
+                "from these documents into the SOW scope and recommendations."
+            )
+
         spatial_block = ""
         if spatial_lines:
             spatial_block = "\n\nSPATIAL CONTEXT (from uploaded media EXIF / GPS):\n" + "\n".join(spatial_lines)
 
         header = "\n".join(meta_lines) + "\n\n" if meta_lines else ""
         return (
-            f"{header}{notes_block}\n\n{evidence_block}{spatial_block}\n\n"
+            f"{header}{notes_block}\n\n{evidence_block}{sop_block}{spatial_block}\n\n"
             "Generate the SOW JSON per the OUTPUT CONTRACT. Be specific, use only "
             "the supplied evidence, and stay "
             "within the agreed severity/priority vocabulary."

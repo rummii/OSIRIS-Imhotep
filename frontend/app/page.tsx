@@ -7,7 +7,7 @@ import { AlertTriangle, FileText, LogOut, ShieldCheck, Sparkles, UserRound } fro
 import ChatInput, { type ChatSubmission } from "@/components/ChatInput";
 import LoadingIndicator from "@/components/LoadingIndicator";
 import SowReport from "@/components/SowReport";
-import { generateSow, saveFromGeneration } from "@/lib/api";
+import { generateSow } from "@/lib/api";
 import type { GenerateResponse } from "@/lib/types";
 import { clearAuth, getCachedUser, isAuthenticated, type SessionUser } from "@/lib/auth";
 
@@ -19,7 +19,7 @@ type Message =
       client: string;
       media: { name: string; kind: string }[];
     }
-  | { role: "assistant"; result: GenerateResponse; docId: number | undefined }
+  | { role: "assistant"; result: GenerateResponse }
   | { role: "error"; message: string };
 
 export default function Home() {
@@ -61,16 +61,17 @@ export default function Home() {
     setPendingMediaCount(submission.files.length);
 
     try {
-      const result = await generateSow(submission);
-      // Auto-save so the SOW appears in the Documents list and can be re-exported.
-      let docId: number | undefined;
-      try {
-        const saved = await saveFromGeneration(result.sow);
-        docId = saved.id;
-      } catch (saveErr) {
-        console.warn("Auto-save failed:", saveErr);
-      }
-      setMessages((prev) => [...prev, { role: "assistant", result, docId }]);
+      const result = await generateSow({
+        notes: submission.notes,
+        site: submission.site,
+        client: submission.client,
+        complianceProfile: submission.complianceProfile,
+        files: submission.files,
+      });
+      // Backend /api/sow/generate already persists the document and returns
+      // its id in result.document_id; do not POST /api/sow/from-generation
+      // here, that would create a duplicate row in sow_documents.
+      setMessages((prev) => [...prev, { role: "assistant", result }]);
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

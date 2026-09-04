@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ImagePlus, Loader2, Mic, MicOff, Paperclip, Send, X } from "lucide-react";
+import { ChevronDown, ImagePlus, Loader2, Mic, MicOff, Paperclip, Send, ShieldCheck, Upload, X } from "lucide-react";
 import { addPending, deletePending, getPending, type PendingSubmission } from "@/lib/offline-db";
 import { useSpeechDictation } from "@/hooks/useSpeechDictation";
 import { compressImage } from "@/lib/image-compress";
 import PendingQueueBanner from "@/components/PendingQueueBanner";
 import { useOfflineQueue, notifyQueueMutated } from "@/hooks/useOfflineQueue";
+import { COMPLIANCE_PROFILES, type ComplianceProfile } from "@/lib/types";
 
 export interface ChatSubmission {
   notes: string;
   site: string;
   client: string;
   files: File[];
+  complianceProfile: "general" | "dpwh" | "dole" | "philgeps";
 }
 
 interface ChatInputProps {
@@ -34,6 +36,11 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
   const [media, setMedia] = useState<{ file: File; url: string; compressing?: boolean }[]>([]);
   /** Number of photos currently being compressed (used for UX feedback). */
   const [compressingCount, setCompressingCount] = useState(0);
+  /** Phase 3: compliance profile for SOW generation */
+  const [complianceProfile, setComplianceProfile] = useState<ComplianceProfile>("general");
+  /** Phase 3: SOP / knowledge-base files to attach to the generation request */
+  const [sopFiles, setSopFiles] = useState<{ file: File; uploading: boolean; error?: string }[]>([]);
+  const sopFileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isSubmittingRef = useRef(false);
 
@@ -56,7 +63,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
               files.push(new File([await resp.blob()], mf.name, { type: mf.type }));
             } catch { /* blob expired */ }
           }
-          const ok = await onSubmit({ notes: item.notes, site: item.site, client: item.client, files });
+          const ok = await onSubmit({ notes: item.notes, site: item.site, client: item.client, complianceProfile: "general", files });
           if (ok && item.id !== undefined) await deletePending(item.id);
         }
         await queue.reload();
@@ -173,7 +180,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
     if (!canSubmit) return;
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
-    const submission: ChatSubmission = { notes, site, client, files: media.map((m) => m.file) };
+    const submission: ChatSubmission = { notes, site, client, complianceProfile, files: media.map((m) => m.file) };
     try {
       // Queue and clear form if the browser is offline (or e2e forces offline).
       if (isOffline()) {
@@ -215,7 +222,7 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
         files.push(new File([await resp.blob()], mf.name, { type: mf.type }));
       } catch { /* blob expired */ }
     }
-    return await onSubmit({ notes: item.notes, site: item.site, client: item.client, files });
+    return await onSubmit({ notes: item.notes, site: item.site, client: item.client, complianceProfile: "general", files });
   }
 
   return (
@@ -367,6 +374,105 @@ export default function ChatInput({ pending, onSubmit }: ChatInputProps) {
                 placeholder="Client name"
                 className="input-chip w-48"
               />
+              <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                <ShieldCheck size={13} /> Compliance
+              </span>
+              <select
+                value={complianceProfile}
+                onChange={(e) => setComplianceProfile(e.target.value as ComplianceProfile)}
+                title={COMPLIANCE_PROFILES[complianceProfile].description}
+                className="input-chip w-56"
+                aria-label="Compliance profile"
+              >
+                {(Object.keys(COMPLIANCE_PROFILES) as ComplianceProfile[]).map((p) => (
+                  <option key={p} value={p}>
+                    {COMPLIANCE_PROFILES[p].label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => sopFileInputRef.current?.click()}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 transition"
+                title="Attach SOP / knowledge-base reference documents (PDF or TXT, up to 8 MB each)"
+              >
+                <Upload size={12} /> SOP / KB
+              </button>
+              <input
+                ref={sopFileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                className="hidden"
+                onChange={(e) => {
+                  const list = e.target.files;
+                  if (list) {
+                    const added = Array.from(list).map((f) => ({ file: f, uploading: true }));
+                    setSopFiles((prev) => [...prev, ...added]);
+                    void Promise.all(
+                      added.map(async (entry) => {
+                        try {
+                          const fd = new FormData();
+                          fd.append("file", entry.file);
+                          const res = await fetch("/api/sop/upload", { method: "POST", body: fd });
+                          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                          const data = (await res.json()) as { ok: boolean; source: string; chunks_added: number };
+                          setSopFiles((prev) =>
+                            prev.map((s) =>
+                              s.file === entry.file
+                                ? { file: s.file, uploading: false, error: undefined }
+                                : s,
+                            ),
+                          );
+                          // Stash the source id for the generate call
+                          (entry.file as File & { __sopSource?: string }).__sopSource = data.source;
+                        } catch (err) {
+                          setSopFiles((prev) =>
+                            prev.map((s) =>
+                              s.file === entry.file
+                                ? {
+                                    file: s.file,
+                                    uploading: false,
+                                    error: err instanceof Error ? err.message : "Upload failed",
+                                  }
+                                : s,
+                            ),
+                          );
+                        }
+                      }),
+                    );
+                  }
+                  e.target.value = "";
+                }}
+              />
+              {sopFiles.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {sopFiles.map((s, i) => (
+                    <span
+                      key={i}
+                      className={
+                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                        (s.error
+                          ? "bg-red-50 text-red-700 border border-red-200"
+                          : s.uploading
+                          ? "bg-amber-50 text-amber-700 border border-amber-200"
+                          : "bg-emerald-50 text-emerald-700 border border-emerald-200")
+                      }
+                      title={s.error ?? `Indexed: ${(s.file as File & { __sopSource?: string }).__sopSource ?? s.file.name}`}
+                    >
+                      {s.error ? "✗" : s.uploading ? "⏳" : "✓"} {s.file.name}
+                      <button
+                        type="button"
+                        onClick={() => setSopFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="ml-0.5 opacity-60 hover:opacity-100"
+                        aria-label={`Remove ${s.file.name}`}
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>
