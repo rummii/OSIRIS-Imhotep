@@ -221,6 +221,14 @@ def generate_sow(
     except DeepSeekAnalysisError as exc:
         logger.exception("DeepSeek analysis failed.")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        # Catch-all: convert any other unexpected failure into a 503 with a
+        # human-readable message instead of letting FastAPI emit a bare 500.
+        logger.exception("Unexpected error during SOW generation.")
+        raise HTTPException(
+            status_code=503,
+            detail="Generation failed due to an unexpected error. This is usually temporary — please try again in a few moments.",
+        ) from exc
 
     # 5. Validate / coerce the model output --------------------------------------
     try:

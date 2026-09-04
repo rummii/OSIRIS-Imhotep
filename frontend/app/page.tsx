@@ -257,6 +257,7 @@ function UserBubble({ message }: { message: Extract<Message, { role: "user" }> }
 }
 
 function ErrorBubble({ message }: { message: string }) {
+  const is500 = message.includes("500") || message.toLowerCase().includes("internal server error");
   return (
     <div className="flex justify-center animate-fade-up">
       <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 max-w-lg">
@@ -264,6 +265,11 @@ function ErrorBubble({ message }: { message: string }) {
         <div>
           <p className="text-xs font-semibold text-red-300">Analysis failed</p>
           <p className="mt-0.5 text-xs text-red-300/80">{message}</p>
+          {is500 && (
+            <p className="mt-1 text-[10px] text-red-400 italic">
+              Server error — this is usually temporary. Please wait a moment and try again.
+            </p>
+          )}
         </div>
       </div>
     </div>

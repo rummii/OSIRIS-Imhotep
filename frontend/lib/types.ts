@@ -32,8 +32,10 @@ export interface RecommendedService {
 export interface ScopeItem {
   phase: string;
   work_description: string;
-  deliverables: string[];
-  duration_days: number;
+  deliverables?: string[];
+  duration_days?: number;
+  depends_on?: string[];
+  sequence?: number;
 }
 
 export interface CostBreakdown {
@@ -55,11 +57,11 @@ export interface SowResponse {
   currency: string;
   /** Fallback summary used by older/legacy saved docs that lack executive_summary. */
   scope_summary?: string;
-  executive_summary: ExecutiveSummary;
-  visual_findings: VisualFinding[];
-  recommended_services: RecommendedService[];
-  scope_breakdown: ScopeItem[];
-  cost_breakdown: CostBreakdown;
+  executive_summary?: ExecutiveSummary;
+  visual_findings?: VisualFinding[];
+  recommended_services?: RecommendedService[];
+  scope_breakdown?: ScopeItem[];
+  cost_breakdown?: CostBreakdown;
 }
 
 export interface GroundingSource {
