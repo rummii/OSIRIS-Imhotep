@@ -78,10 +78,15 @@ class VectorStore:
     def _init(self) -> None:
         try:
             conn = self._connect()
-            conn.execute("SELECT vec_f32('[1.0, 2.0, 3.0]')")
+            # Probe the extension with vec_length() + vec_version(); both
+            # are guaranteed by every sqlite-vec release.
+            version, = conn.execute("SELECT vec_version()").fetchone()
+            _, = conn.execute(
+                "SELECT vec_length(?)", [__import__("sqlite_vec").serialize_float32([0.1, 0.2, 0.3])]
+            ).fetchone()
             conn.close()
             self._init_vec_schema()
-            logger.info("sqlite-vec extension loaded; using ANN index.")
+            logger.info("sqlite-vec %s loaded; using ANN index.", version)
         except Exception as exc:
             logger.warning("sqlite-vec unavailable (%s).  Falling back to numpy cosine search.", exc)
             self._use_numpy = True
@@ -190,12 +195,13 @@ class VectorStore:
                         (doc_id, _pack(embedding)),
                     )
                 else:
-                    # sqlite-vec virtual table: embed the float list as a JSON
-                    # string so the vec_f32() SQL function can parse it.
-                    import json as _json
+                    # sqlite-vec virtual table: vectors are stored as
+                    # float32 BLOBs.  ``sqlite_vec.serialize_float32`` packs a
+                    # Python list into the exact byte layout vec0 expects.
+                    from sqlite_vec import serialize_float32
                     conn.execute(
-                        "INSERT OR REPLACE INTO vectors (rowid, embedding) VALUES (?, vec_f32(?))",
-                        (doc_id, _json.dumps(embedding)),
+                        "INSERT OR REPLACE INTO vectors (rowid, embedding) VALUES (?, ?)",
+                        (doc_id, serialize_float32(embedding)),
                     )
                 conn.commit()
                 count += 1
