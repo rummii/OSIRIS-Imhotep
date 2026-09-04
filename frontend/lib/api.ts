@@ -314,17 +314,17 @@ export interface RagIngestStats {
   engine: string;
 }
 
-/** GET /api/admin/users/rag/stats (superadmin only). */
+/** GET /api/admin/rag/stats (superadmin only). */
 export async function adminRagStats(): Promise<RagStatsResponse> {
-  const res = await fetch("/api/admin/users/rag/stats", { headers: authHeaders() });
+  const res = await fetch("/api/admin/rag/stats", { headers: authHeaders() });
   if (handleUnauthorized(res)) throw new Error("Session expired");
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }
 
-/** POST /api/admin/users/rag/refresh (superadmin only) — re-embed the full corpus. */
+/** POST /api/admin/rag/refresh (superadmin only) — re-embed the full corpus. */
 export async function adminRagRefresh(): Promise<RagIngestStats> {
-  const res = await fetch("/api/admin/users/rag/refresh", {
+  const res = await fetch("/api/admin/rag/refresh", {
     method: "POST",
     headers: authHeaders(),
   });
