@@ -29,6 +29,49 @@ logger = logging.getLogger("osiris.auth")
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent  # backend/
 
 
+# pg8000 server-side prepared statements can be deallocated (statement_timeout,
+# max_prepared_statements eviction, or session reset). When that happens, the
+# client-side cache holds a stale name and the next execute() raises
+#   "DatabaseError: unnamed prepared statement does not exist" (SQLSTATE 26000)
+# on a perfectly healthy connection. We detect that specific error, drop the
+# connection, and retry once on a fresh one.
+_PG_STMT_EVICTED = "26000"  # SQLSTATE for "invalid SQL statement name"
+
+
+def _pg_retry(fn):
+    """Retry a DB method once on pg8000 prepared-statement cache invalidation.
+
+    Only applies to the PostgreSQL (pg8000) backend. SQLite calls pass through
+    unchanged because SQLite has no client-side prepared-statement cache.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return fn(self, *args, **kwargs)
+        except Exception as exc:
+            if not getattr(self, "is_postgres", False):
+                raise
+            # Match by class name + SQLSTATE so we don't add a hard import on
+            # pg8000.exceptions (keeps the SQLite-only import graph clean).
+            if exc.__class__.__name__ != "DatabaseError":
+                raise
+            sqlstate = ""
+            if hasattr(exc, "args") and exc.args:
+                first = exc.args[0]
+                if isinstance(first, dict):
+                    sqlstate = first.get("C", "") or ""
+            if sqlstate != _PG_STMT_EVICTED:
+                raise
+            logger.warning(
+                "pg8000 prepared statement evicted (SQLSTATE 26000); retrying on fresh connection"
+            )
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 class AuthError(RuntimeError):
     """Raised on bad credentials / validation failures (mapped to 4xx)."""
 
@@ -296,6 +339,7 @@ class UserStore:
             conn.close()
         return self.get_by_id(user_id)
 
+    @_pg_retry
     def get_by_username(self, username: str) -> Optional[dict[str, Any]]:
         conn = self._connect()
         try:
@@ -306,6 +350,7 @@ class UserStore:
         finally:
             conn.close()
 
+    @_pg_retry
     def get_by_id(self, user_id: int) -> Optional[dict[str, Any]]:
         conn = self._connect()
         try:

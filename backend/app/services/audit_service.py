@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.config import Settings
+from app.services.auth_service import _pg_retry
 
 logger = logging.getLogger("osiris.audit")
 
@@ -154,6 +155,7 @@ class AuditStore:
         except Exception:
             logger.warning("AuditStore.insert failed - audit event dropped", exc_info=True)
 
+    @_pg_retry
     def list(self, *, user_id: Optional[int] = None, action: Optional[str] = None,
              since: Optional[str] = None, until: Optional[str] = None,
              limit: int = 200, offset: int = 0) -> list:
@@ -193,6 +195,7 @@ class AuditStore:
         finally:
             conn.close()
 
+    @_pg_retry
     def count(self, *, user_id: Optional[int] = None, action: Optional[str] = None) -> int:
         ph = self._ph()
         conditions = []
