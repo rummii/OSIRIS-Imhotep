@@ -55,18 +55,38 @@ steps:
   # Capture the live backend URL to /workspace/.backend-url so the frontend
   # build can use it as a build-arg. This is the key step that keeps the
   # frontend in sync with the backend across redeploys.
+  #
+  # Uses the compute SA (which has roles/run.admin) because the default
+  # Cloud Build SA only has roles/cloudbuild.builds.builder and lacks
+  # permission to call gcloud run services describe.
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     id: "get-backend-url"
     entrypoint: "bash"
+    serviceAccount: "projects/osiris-imhotep-507623/serviceAccounts/824525498687-compute@developer.gserviceaccount.com"
     args:
       - "-c"
       - |
-        set -euo pipefail
+        set +e
+        echo "=== get-backend-url: starting ==="
+        echo "PROJECT_ID=$$PROJECT_ID"
+        echo "BRANCH_NAME=$$BRANCH_NAME"
+        echo "PWD=$$(pwd)"
+        echo "ls -la /workspace 2>&1 || true"
+        ls -la /workspace 2>&1 || true
+        echo "=== running gcloud run services describe ==="
         BACKEND_URL=$$(gcloud run services describe osiris-imhotep \
           --project=$$PROJECT_ID --region=asia-east2 \
-          --format='value(status.url)')
+          --format='value(status.url)' 2>&1)
+        echo "gcloud exit: $$?"
+        echo "BACKEND_URL=[$$BACKEND_URL]"
+        if [ -z "$$BACKEND_URL" ]; then
+          echo "ERROR: failed to capture backend URL" >&2
+          exit 1
+        fi
         echo "$$BACKEND_URL" > /workspace/.backend-url
-        echo "Captured backend URL: $$BACKEND_URL"
+        echo "Wrote /workspace/.backend-url:"
+        cat /workspace/.backend-url
+        echo "=== get-backend-url: done ==="
 
   # Build frontend using the live backend URL captured above.
   # NOTE: next.config.js rewrites() and the standalone server's BACKEND_URL
@@ -77,8 +97,12 @@ steps:
     args:
       - "-c"
       - |
-        set -euo pipefail
+        set -e
+        echo "=== build-frontend: starting ==="
+        echo "Reading /workspace/.backend-url:"
+        cat /workspace/.backend-url
         BACKEND_URL=$$(cat /workspace/.backend-url)
+        echo "BACKEND_URL=[$$BACKEND_URL]"
         echo "Building frontend with BACKEND_URL=$$BACKEND_URL"
         docker build \
           -t "asia-east2-docker.pkg.dev/$$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:$$_TAG" \
@@ -118,9 +142,11 @@ steps:
 
   # Set CORS_ORIGINS on the backend to allow the live frontend origin.
   # Runs after both services are deployed so the frontend URL is stable.
+  # Uses the compute SA (roles/run.admin) for the same reason as get-backend-url.
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     id: "set-cors"
     entrypoint: "bash"
+    serviceAccount: "projects/osiris-imhotep-507623/serviceAccounts/824525498687-compute@developer.gserviceaccount.com"
     args:
       - "-c"
       - |
