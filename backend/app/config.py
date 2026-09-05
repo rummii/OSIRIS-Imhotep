@@ -58,6 +58,19 @@ class Settings(BaseSettings):
     # --- Phase 4: export gate ---
     export_costing_enabled: bool = True
 
+    # --- Cost estimation ---
+    cost_currency: str = "PHP"           # ISO-4217 code; defaults to Philippine Peso
+    cost_contingency_pct: float = 10.0   # applied to subtotal by CostEstimator
+    cost_vat_pct: float = 0.0            # optional VAT; 0 disables
+    cost_rates_override: str = ""        # JSON string override of DEFAULT_RATES_PHP
+
+    # --- Web scraper (Phase 2 RAG) ---
+    scraper_enabled: bool = False        # master switch; per-source enable happens in admin
+    scraper_rate_limit_seconds: float = 1.0
+    scraper_timeout_seconds: float = 30.0
+    scraper_max_retries: int = 3
+    scraper_user_agent: str = "OSIRIS-Imhotep/1.0 (+compliance-bot)"
+
     # --- Phase 5 Track 2: rate limiting ---
     rate_limit_generate_per_minute: int = 10
     rate_limit_login_per_minute: int = 10  # strict for production; E2E suite uses per-IP buckets + reset endpoint to stay under limit

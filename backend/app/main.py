@@ -10,10 +10,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.admin_routes import router as admin_router, audit_router, config_router
+from app.api.admin_routes import (
+    router as admin_router,
+    audit_router,
+    config_router,
+    compliance_router,
+)
+from app.api.cost_routes import router as cost_router
 from app.api.rag_routes import router as rag_router
 from app.api.auth_routes import router as auth_router
 from app.api.routes import router
+from app.api.scraper_routes import router as scraper_router
 from app.api.sop_routes import router as sop_router
 from app.api.sow_routes import router as sow_router
 from app.config import get_settings
@@ -91,9 +98,12 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api")
     app.include_router(audit_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
+    app.include_router(compliance_router, prefix="/api")
     app.include_router(rag_router, prefix="/api")
     app.include_router(sow_router, prefix="/api")
     app.include_router(sop_router, prefix="/api")
+    app.include_router(cost_router, prefix="/api")
+    app.include_router(scraper_router, prefix="/api")
 
     # Test-only endpoint: clears the in-memory rate-limit buckets so the
     # E2E suite can run multiple flood tests without poisoning the

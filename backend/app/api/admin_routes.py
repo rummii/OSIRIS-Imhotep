@@ -15,6 +15,8 @@ from app.models.auth_models import (
 )
 from app.services.audit_service import AuditService
 from app.services.auth_service import AuthError, AuthService
+from app.services.prompt_builder import COMPLIANCE_BLOCKS
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/admin/users", tags=["admin"], dependencies=[Depends(require_superadmin)])
 
@@ -125,4 +127,46 @@ def get_export_config(_: dict = Depends(require_superadmin)) -> object:
     whether to surface (or hide) the costing-format export buttons.
     """
     settings = get_settings()
-    return {"export_costing_enabled": settings.export_costing_enabled}
+    return {
+        "export_costing_enabled": settings.export_costing_enabled,
+        "compliance_profiles": list(COMPLIANCE_BLOCKS.keys()),
+    }
+
+
+# -------------------------------------------------------------------
+# Compliance profile registry (read-only listing for the admin UI)
+# GET /api/admin/config/compliance-profiles
+# GET /api/admin/config/compliance-profiles/{key}
+# -------------------------------------------------------------------
+compliance_router = APIRouter(
+    prefix="/admin/config/compliance-profiles",
+    tags=["admin"],
+    dependencies=[Depends(require_superadmin)],
+)
+
+
+class ComplianceProfileSummary(BaseModel):
+    key: str
+    name: str
+    description: str
+    length: int = 0
+
+
+@compliance_router.get("", response_model=list[ComplianceProfileSummary])
+def list_compliance_profiles() -> list[ComplianceProfileSummary]:
+    names = {"dpwh": "DPWH Infrastructure",
+             "dole": "DOLE Occupational Safety and Health",
+             "philgeps": "PhilGEPS / Government Procurement"}
+    return [ComplianceProfileSummary(
+        key=k,
+        name=names.get(k, k.title()),
+        description=v.split("\n", 1)[1].strip() if "\n" in v else v,
+        length=len(v),
+    ) for k, v in COMPLIANCE_BLOCKS.items()]
+
+
+@compliance_router.get("/{key}")
+def get_compliance_profile(key: str) -> dict:
+    if key not in COMPLIANCE_BLOCKS:
+        raise HTTPException(status_code=404, detail=f"Unknown compliance profile: {key}")
+    return {"key": key, "content": COMPLIANCE_BLOCKS[key]}

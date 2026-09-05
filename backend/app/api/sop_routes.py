@@ -34,7 +34,7 @@ def _extract_text(content: bytes, filename: str) -> str:
         except ImportError:
             raise HTTPException(
                 status_code=501,
-                detail="PDF processing requires pypaf. Install it: pip install pypdf.",
+                detail="PDF processing requires pypdf. Install it: pip install pypdf.",
             )
         except Exception as exc:
             raise HTTPException(
