@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import sqlite3
 import ssl
@@ -457,14 +458,29 @@ class AuthService:
 
     # -- seeding ---------------------------------------------------------------
     def ensure_superadmin(self) -> None:
+        # RECOVERY HATCH: if RESET_SUPERADMIN_PASSWORD env var is set, force the
+        # password to that value.  This lets a locked-out deployer regain access
+        # without touching Secret Manager.  After a successful login the deployer
+        # should UNSET this env var so the reset is not re-triggered on next restart.
+        reset_pw = os.environ.get("RESET_SUPERADMIN_PASSWORD", "").strip()
+        target_username = self.settings.superadmin_username.strip() or "admin"
+        if reset_pw:
+            existing = self.store.get_by_username(target_username)
+            if existing is not None:
+                self.store.set_password(int(existing["id"]), reset_pw)
+                logger.warning(
+                    "Superadmin password FORCE-RESET via RESET_SUPERADMIN_PASSWORD env var (username=%s)",
+                    target_username,
+                )
+                return
+            # User not seeded yet — fall through to create them with the reset password
         if self.store.count_users() > 0:
             return
-        username = self.settings.superadmin_username.strip() or "admin"
         password = self.settings.superadmin_password.strip()
         if not password:
             password = secrets.token_urlsafe(12)
         self.store.create_user(
-            username=username,
+            username=target_username,
             password=password,
             display_name=self.settings.superadmin_display_name.strip() or "System Administrator",
             email=self.settings.superadmin_email.strip(),
@@ -472,7 +488,7 @@ class AuthService:
         )
         logger.warning(
             "Seeded default superadmin — username=%s password=%s  (change it after first login!)",
-            username,
+            target_username,
             password,
         )
 
