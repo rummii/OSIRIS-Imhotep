@@ -76,6 +76,8 @@ steps:
   # Build frontend using the live backend URL captured above.
   # NOTE: next.config.js rewrites() and the standalone server's BACKEND_URL
   # are read at build time, so the URL MUST be correct when this step runs.
+  # _TAG is a Cloud Build substitution — we pass it as a positional arg
+  # (Cloud Build does not export substitutions as env vars in bash scripts).
   - name: "gcr.io/cloud-builders/docker"
     id: "build-frontend"
     entrypoint: "bash"
@@ -84,15 +86,17 @@ steps:
       - |
         set -e
         PROJECT=osiris-imhotep-507623
+        TAG="$$1"
         BACKEND_URL=$$(cat /workspace/.backend-url)
-        echo "Building frontend with BACKEND_URL=$$BACKEND_URL"
+        echo "Building frontend with BACKEND_URL=$$BACKEND_URL TAG=$$TAG"
         docker build \
-          -t "asia-east2-docker.pkg.dev/$$PROJECT/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:$$_TAG" \
+          -t "asia-east2-docker.pkg.dev/$$PROJECT/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:$$TAG" \
           -t "asia-east2-docker.pkg.dev/$$PROJECT/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest" \
           --build-arg "BACKEND_URL=$$BACKEND_URL" \
           --build-arg "NEXT_PUBLIC_BACKEND_URL=$$BACKEND_URL" \
           --build-arg "NEXT_PUBLIC_API_URL=$$BACKEND_URL" \
           -f frontend/Dockerfile .
+      - "${_TAG}"
 
   # Frontend → Artifact Registry
   - name: "gcr.io/cloud-builders/docker"
