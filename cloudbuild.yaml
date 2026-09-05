@@ -86,7 +86,9 @@ steps:
       - |
         set -e
         PROJECT=osiris-imhotep-507623
-        TAG="$$1"
+        # $0 is the third positional arg to bash -c, which Cloud Build fills
+        # in via the ${_TAG} substitution below. ($1, $2 etc. are unset.)
+        TAG="$$0"
         BACKEND_URL=$$(cat /workspace/.backend-url)
         echo "Building frontend with BACKEND_URL=$$BACKEND_URL TAG=$$TAG"
         docker build \
