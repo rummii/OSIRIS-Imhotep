@@ -56,13 +56,11 @@ steps:
   # build can use it as a build-arg. This is the key step that keeps the
   # frontend in sync with the backend across redeploys.
   #
-  # Uses the compute SA (which has roles/run.admin) because the default
-  # Cloud Build SA only has roles/cloudbuild.builds.builder and lacks
-  # permission to call gcloud run services describe.
+  # The Cloud Build default SA needs roles/run.viewer to call
+  # `gcloud run services describe`. We grant it at the project level.
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     id: "get-backend-url"
     entrypoint: "bash"
-    serviceAccount: "projects/osiris-imhotep-507623/serviceAccounts/824525498687-compute@developer.gserviceaccount.com"
     args:
       - "-c"
       - |
@@ -142,11 +140,9 @@ steps:
 
   # Set CORS_ORIGINS on the backend to allow the live frontend origin.
   # Runs after both services are deployed so the frontend URL is stable.
-  # Uses the compute SA (roles/run.admin) for the same reason as get-backend-url.
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     id: "set-cors"
     entrypoint: "bash"
-    serviceAccount: "projects/osiris-imhotep-507623/serviceAccounts/824525498687-compute@developer.gserviceaccount.com"
     args:
       - "-c"
       - |
