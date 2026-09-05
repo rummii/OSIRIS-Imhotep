@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Database, KeyRound, Plus, RefreshCw, UserPlus, Users } from "lucide-react";
+import { ArrowLeft, Database, KeyRound, Pencil, Plus, RefreshCw, UserPlus, Users } from "lucide-react";
 import {
   adminCreateUser,
   adminListAuditLog,
@@ -39,6 +39,8 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [resetFor, setResetFor] = useState<number | null>(null);
   const [resetPw, setResetPw] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ display_name: "", email: "", role: "user" });
 
   // RAG card state
   const [ragStats, setRagStats] = useState<RagStatsResponse | null>(null);
@@ -162,6 +164,32 @@ export default function AdminPage() {
     }
   };
 
+  const doEdit = (user: AdminUser) => {
+    setEditingId(user.id);
+    setEditForm({ display_name: user.display_name ?? "", email: user.email ?? "", role: user.role });
+    setError("");
+    setNotice("");
+  };
+
+  const doSaveEdit = async (user: AdminUser) => {
+    if (!editForm.display_name.trim()) {
+      setError("Display name is required.");
+      return;
+    }
+    try {
+      await adminUpdateUser(user.id, editForm);
+      setEditingId(null);
+      setNotice(`User "${user.username}" updated.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    }
+  };
+
+  const doCancelEdit = () => {
+    setEditingId(null);
+    setError("");
+  };
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -280,7 +308,39 @@ export default function AdminPage() {
                       {user.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-5 py-3 text-right whitespace-nowrap">
-                      {resetFor === user.id ? (
+                      {editingId === user.id ? (
+                        <span className="inline-flex items-center gap-1 flex-wrap justify-end">
+                          <input
+                            placeholder="Display name"
+                            value={editForm.display_name}
+                            onChange={(e) => setEditForm({ ...editForm, display_name: e.target.value })}
+                            className="w-28 rounded-md border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-600"
+                          />
+                          <input
+                            type="email"
+                            placeholder="Email"
+                            value={editForm.email}
+                            onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                            className="w-32 rounded-md border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-600"
+                          />
+                          <select
+                            value={editForm.role}
+                            onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-xs outline-none focus:border-blue-600"
+                          >
+                            <option value="user">User</option>
+                            <option value="superadmin">Superadmin</option>
+                          </select>
+                          <button type="button" onClick={() => doSaveEdit(user)}
+                            className="rounded bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-700">
+                            Save
+                          </button>
+                          <button type="button" onClick={doCancelEdit}
+                            className="text-xs text-slate-400 hover:text-slate-700">
+                            Cancel
+                          </button>
+                        </span>
+                      ) : resetFor === user.id ? (
                         <span className="inline-flex items-center gap-1">
                           <input
                             type="password"
@@ -301,6 +361,11 @@ export default function AdminPage() {
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-2">
+                          <button type="button" onClick={() => doEdit(user)}
+                            className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600"
+                            title="Edit user">
+                            <Pencil size={13} /> Edit
+                          </button>
                           <button type="button" onClick={() => { setResetFor(user.id); setResetPw(""); }}
                             className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900"
                             title="Reset password">
