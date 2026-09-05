@@ -73,7 +73,7 @@ steps:
   # are read at build time, so the URL MUST be correct when this step runs.
   - name: "gcr.io/cloud-builders/docker"
     id: "build-frontend"
-    command: "bash"
+    entrypoint: "bash"
     args:
       - "-c"
       - |
