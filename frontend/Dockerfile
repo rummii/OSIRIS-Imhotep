@@ -35,8 +35,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 # BACKEND_URL must be set here too (not just in builder) so the standalone
-# server can read it at runtime.  Override at deploy time with --set-env-vars.
-ENV BACKEND_URL=https://osiris-imhotep-3fu6t5a3hq-df.a.run.app
+# server can read it at runtime. The build-arg value (set by cloudbuild.yaml
+# from the live backend URL) overrides this fallback at image build time.
+ENV BACKEND_URL=http://localhost:8000
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser  --system --uid 1001 --ingroup nodejs nextjs

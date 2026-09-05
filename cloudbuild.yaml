@@ -18,24 +18,9 @@ steps:
       - "Dockerfile.backend"
       - "."
 
-  - name: "gcr.io/cloud-builders/docker"
-    id: "build-frontend"
-    args:
-      - "build"
-      - "-t"
-      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:${_TAG}"
-      - "-t"
-      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest"
-      - "--build-arg"
-      - "BACKEND_URL=${_BACKEND_URL}"
-      - "--build-arg"
-      - "NEXT_PUBLIC_BACKEND_URL=${_BACKEND_URL}"
-      - "--build-arg"
-      - "NEXT_PUBLIC_API_URL=${_BACKEND_URL}"
-      - "-f"
-      - "frontend/Dockerfile"
-      - "."
-
+  # Build frontend using the live backend URL captured by get-backend-url.
+  # NOTE: next.config.js rewrites() and the standalone server's BACKEND_URL
+  # are read at build time, so the URL MUST be correct when this step runs.
   # Backend → Artifact Registry
   - name: "gcr.io/cloud-builders/docker"
     id: "push-backend"
@@ -43,14 +28,6 @@ steps:
       - "push"
       - "--all-tags"
       - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep"
-
-  # Frontend → Artifact Registry
-  - name: "gcr.io/cloud-builders/docker"
-    id: "push-frontend"
-    args:
-      - "push"
-      - "--all-tags"
-      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend"
 
   # Deploy backend to Cloud Run (asia-east2)
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
@@ -75,7 +52,53 @@ steps:
       - "--labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=osiris-imhotep-main"
       - "--quiet"
 
-  # Deploy frontend to Cloud Run (asia-east2)
+  # Capture the live backend URL to /workspace/.backend-url so the frontend
+  # build can use it as a build-arg. This is the key step that keeps the
+  # frontend in sync with the backend across redeploys.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "get-backend-url"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        BACKEND_URL=$$(gcloud run services describe osiris-imhotep \
+          --project=$$PROJECT_ID --region=asia-east2 \
+          --format='value(status.url)')
+        echo "$$BACKEND_URL" > /workspace/.backend-url
+        echo "Captured backend URL: $$BACKEND_URL"
+
+  # Build frontend using the live backend URL captured above.
+  # NOTE: next.config.js rewrites() and the standalone server's BACKEND_URL
+  # are read at build time, so the URL MUST be correct when this step runs.
+  - name: "gcr.io/cloud-builders/docker"
+    id: "build-frontend"
+    command: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        BACKEND_URL=$$(cat /workspace/.backend-url)
+        echo "Building frontend with BACKEND_URL=$$BACKEND_URL"
+        docker build \
+          -t "asia-east2-docker.pkg.dev/$$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:$$_TAG" \
+          -t "asia-east2-docker.pkg.dev/$$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest" \
+          --build-arg "BACKEND_URL=$$BACKEND_URL" \
+          --build-arg "NEXT_PUBLIC_BACKEND_URL=$$BACKEND_URL" \
+          --build-arg "NEXT_PUBLIC_API_URL=$$BACKEND_URL" \
+          -f frontend/Dockerfile .
+
+  # Frontend → Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push-frontend"
+    args:
+      - "push"
+      - "--all-tags"
+      - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend"
+
+  # Deploy frontend to Cloud Run (asia-east2).
+  # NOTE: BACKEND_URL is baked into the image at build time (see build-frontend
+  # step) so it does not need to be set as a runtime env-var here.
   - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
     id: "deploy-frontend"
     entrypoint: "gcloud"
@@ -90,9 +113,26 @@ steps:
       - "--max-instances=3"
       - "--cpu=1"
       - "--memory=512Mi"
-      - "--set-env-vars=BACKEND_URL=https://osiris-imhotep-3fu6t5a3hq-df.a.run.app"
       - "--labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=osiris-imhotep-main"
       - "--quiet"
+
+  # Set CORS_ORIGINS on the backend to allow the live frontend origin.
+  # Runs after both services are deployed so the frontend URL is stable.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "set-cors"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        FRONTEND_URL=$$(gcloud run services describe osiris-frontend \
+          --project=$$PROJECT_ID --region=asia-east2 \
+          --format='value(status.url)')
+        echo "Setting CORS_ORIGINS=$$FRONTEND_URL on osiris-imhotep"
+        gcloud run services update osiris-imhotep \
+          --project=$$PROJECT_ID --region=asia-east2 \
+          --update-env-vars="CORS_ORIGINS=$$FRONTEND_URL" \
+          --quiet
 
 images:
   - "asia-east2-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-imhotep:${_TAG}"
@@ -105,5 +145,4 @@ options:
   logging: "CLOUD_LOGGING_ONLY"
 
 substitutions:
-  _BACKEND_URL: https://osiris-imhotep-3fu6t5a3hq-df.a.run.app
   _TAG: latest
