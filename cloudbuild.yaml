@@ -2,6 +2,8 @@
 # `_DATABASE_URL`/`_JWT_SECRET` rejection). Builds + pushes both images.
 # Pass --substitutions=_TAG=<git short sha> (gcloud can't derive SHORT_SHA
 # when .git/ is excluded from the upload).
+#
+# Trigger: osiris-imhotep-main (GitHub push to main, build-config=this file)
 steps:
   - name: "gcr.io/cloud-builders/docker"
     id: "build-backend"
