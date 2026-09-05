@@ -69,7 +69,7 @@ steps:
       - "--timeout=300"
       - "--cpu=1"
       - "--memory=1Gi"
-      - "--service-account=529038231808-compute@developer.gserviceaccount.com"
+      - "--service-account=824525498687-compute@developer.gserviceaccount.com"
       - "--set-secrets=DEEPSEEK_API_KEY=deepseek-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,JWT_SECRET=jwt-secret:latest,SUPERADMIN_PASSWORD=superadmin-password:latest,DATABASE_URL=database-url:latest,GOOGLE_SERVICE_ACCOUNT_JSON=gdoc-sa-key:latest"
       - "--set-env-vars=GOOGLE_SERVICE_ACCOUNT_FILE=/tmp/app-data/osiris-sa.json,RAG_PROVIDER=sqlite_vec"
       - "--labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=osiris-imhotep-main"
