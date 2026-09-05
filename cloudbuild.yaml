@@ -64,27 +64,14 @@ steps:
     args:
       - "-c"
       - |
-        set +e
-        echo "=== get-backend-url: starting ==="
-        echo "PROJECT_ID=$$PROJECT_ID"
-        echo "BRANCH_NAME=$$BRANCH_NAME"
-        echo "PWD=$$(pwd)"
-        echo "ls -la /workspace 2>&1 || true"
-        ls -la /workspace 2>&1 || true
-        echo "=== running gcloud run services describe ==="
+        set -e
+        PROJECT=osiris-imhotep-507623
+        echo "=== get-backend-url: capturing backend URL for project $$PROJECT ==="
         BACKEND_URL=$$(gcloud run services describe osiris-imhotep \
-          --project=$$PROJECT_ID --region=asia-east2 \
-          --format='value(status.url)' 2>&1)
-        echo "gcloud exit: $$?"
-        echo "BACKEND_URL=[$$BACKEND_URL]"
-        if [ -z "$$BACKEND_URL" ]; then
-          echo "ERROR: failed to capture backend URL" >&2
-          exit 1
-        fi
+          --project=$$PROJECT --region=asia-east2 \
+          --format='value(status.url)')
+        echo "Captured backend URL: $$BACKEND_URL"
         echo "$$BACKEND_URL" > /workspace/.backend-url
-        echo "Wrote /workspace/.backend-url:"
-        cat /workspace/.backend-url
-        echo "=== get-backend-url: done ==="
 
   # Build frontend using the live backend URL captured above.
   # NOTE: next.config.js rewrites() and the standalone server's BACKEND_URL
@@ -96,15 +83,12 @@ steps:
       - "-c"
       - |
         set -e
-        echo "=== build-frontend: starting ==="
-        echo "Reading /workspace/.backend-url:"
-        cat /workspace/.backend-url
+        PROJECT=osiris-imhotep-507623
         BACKEND_URL=$$(cat /workspace/.backend-url)
-        echo "BACKEND_URL=[$$BACKEND_URL]"
         echo "Building frontend with BACKEND_URL=$$BACKEND_URL"
         docker build \
-          -t "asia-east2-docker.pkg.dev/$$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:$$_TAG" \
-          -t "asia-east2-docker.pkg.dev/$$PROJECT_ID/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest" \
+          -t "asia-east2-docker.pkg.dev/$$PROJECT/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:$$_TAG" \
+          -t "asia-east2-docker.pkg.dev/$$PROJECT/cloud-run-source-deploy/osiris-imhotep/osiris-frontend:latest" \
           --build-arg "BACKEND_URL=$$BACKEND_URL" \
           --build-arg "NEXT_PUBLIC_BACKEND_URL=$$BACKEND_URL" \
           --build-arg "NEXT_PUBLIC_API_URL=$$BACKEND_URL" \
@@ -146,13 +130,14 @@ steps:
     args:
       - "-c"
       - |
-        set -euo pipefail
+        set -e
+        PROJECT=osiris-imhotep-507623
         FRONTEND_URL=$$(gcloud run services describe osiris-frontend \
-          --project=$$PROJECT_ID --region=asia-east2 \
+          --project=$$PROJECT --region=asia-east2 \
           --format='value(status.url)')
         echo "Setting CORS_ORIGINS=$$FRONTEND_URL on osiris-imhotep"
         gcloud run services update osiris-imhotep \
-          --project=$$PROJECT_ID --region=asia-east2 \
+          --project=$$PROJECT --region=asia-east2 \
           --update-env-vars="CORS_ORIGINS=$$FRONTEND_URL" \
           --quiet
 
